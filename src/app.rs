@@ -1,13 +1,21 @@
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
-use chrono::Datelike;
+use chrono::{Datelike, NaiveDate};
 use eframe::egui;
 
 use camdrop::detector;
 use camdrop::organizer::{self, DateFilter, Event, Options, PreviewItem};
+
+const ACCENT: egui::Color32 = egui::Color32::from_rgb(54, 170, 208);
+const ACCENT_STRONG: egui::Color32 = egui::Color32::from_rgb(34, 132, 168);
+const ON_ACCENT: egui::Color32 = egui::Color32::from_rgb(8, 20, 27);
+const BG: egui::Color32 = egui::Color32::from_rgb(17, 21, 27);
+const SURFACE: egui::Color32 = egui::Color32::from_rgb(26, 32, 40);
+const SURFACE_HI: egui::Color32 = egui::Color32::from_rgb(38, 47, 59);
 
 enum Msg {
     Cards(Vec<PathBuf>),
@@ -23,14 +31,6 @@ enum ViewMode {
     Tree,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum FilterMode {
-    All,
-    Year,
-    Month,
-    Day,
-}
-
 struct Card {
     path: PathBuf,
     selected: bool,
@@ -41,13 +41,10 @@ pub struct CamDropApp {
     rx: Receiver<Msg>,
     cards: Vec<Card>,
     preview: Vec<PreviewItem>,
+    selected_days: BTreeSet<NaiveDate>,
     view: ViewMode,
     target: String,
     copy_only: bool,
-    filter_mode: FilterMode,
-    filter_year: i32,
-    filter_month: u32,
-    filter_day: u32,
     detecting: bool,
     scanning: bool,
     busy: bool,
@@ -82,13 +79,10 @@ impl CamDropApp {
             rx,
             cards: Vec::new(),
             preview: Vec::new(),
+            selected_days: BTreeSet::new(),
             view: ViewMode::Files,
             target,
             copy_only: false,
-            filter_mode: FilterMode::All,
-            filter_year: 0,
-            filter_month: 1,
-            filter_day: 1,
             detecting: true,
             scanning: false,
             busy: false,
@@ -108,55 +102,27 @@ impl CamDropApp {
     }
 
     fn current_filter(&self) -> DateFilter {
-        match self.filter_mode {
-            FilterMode::All => DateFilter::All,
-            FilterMode::Year => DateFilter::Year(self.filter_year),
-            FilterMode::Month => DateFilter::Month(self.filter_year, self.filter_month),
-            FilterMode::Day => {
-                DateFilter::Day(self.filter_year, self.filter_month, self.filter_day)
-            }
+        if self.selected_days.is_empty() {
+            DateFilter::All
+        } else {
+            DateFilter::Days(self.selected_days.clone())
         }
     }
 
-    /// Distinct years, months (within the selected year) and days (within the
-    /// selected month) present in the scanned files.
-    fn available_dates(&self) -> (Vec<i32>, Vec<u32>, Vec<u32>) {
-        let mut years = BTreeSet::new();
-        let mut months = BTreeSet::new();
-        let mut days = BTreeSet::new();
+    /// Years → months → days present in the scanned files.
+    fn available_dates(&self) -> BTreeMap<i32, BTreeMap<u32, BTreeSet<u32>>> {
+        let mut tree: BTreeMap<i32, BTreeMap<u32, BTreeSet<u32>>> = BTreeMap::new();
         for item in &self.preview {
             let Some(date) = item.date else {
                 continue;
             };
-            years.insert(date.year());
-            if date.year() == self.filter_year {
-                months.insert(date.month());
-                if date.month() == self.filter_month {
-                    days.insert(date.day());
-                }
-            }
+            tree.entry(date.year())
+                .or_default()
+                .entry(date.month())
+                .or_default()
+                .insert(date.day());
         }
-        (
-            years.into_iter().collect(),
-            months.into_iter().collect(),
-            days.into_iter().collect(),
-        )
-    }
-
-    /// Keeps the selected year/month/day pointing at values that exist.
-    fn sync_filter(&mut self) {
-        let (years, _, _) = self.available_dates();
-        if !years.is_empty() && !years.contains(&self.filter_year) {
-            self.filter_year = years[0];
-        }
-        let (_, months, _) = self.available_dates();
-        if !months.is_empty() && !months.contains(&self.filter_month) {
-            self.filter_month = months[0];
-        }
-        let (_, _, days) = self.available_dates();
-        if !days.is_empty() && !days.contains(&self.filter_day) {
-            self.filter_day = days[0];
-        }
+        tree
     }
 
     fn rescan_cards(&mut self, ctx: &egui::Context) {
@@ -184,7 +150,8 @@ impl CamDropApp {
         let tx = self.tx.clone();
         let ctx = ctx.clone();
         thread::spawn(move || {
-            let items = organizer::preview(&sources, &Options::default(), |event| {
+            let opts = Options::default();
+            let items = organizer::preview(&sources, &opts, |event| {
                 if let Event::Progress(done, total) = event {
                     let _ = tx.send(Msg::Progress(done, total));
                     ctx.request_repaint();
@@ -232,9 +199,10 @@ impl CamDropApp {
                         .collect();
                     self.detecting = false;
                     self.preview.clear();
+                    self.selected_days.clear();
                     if self.cards.is_empty() {
                         self.log
-                            .push("未检测到存储卡，点击「添加文件夹」手动选择".to_owned());
+                            .push("未检测到存储卡，点击「选择来源文件夹」手动选择".to_owned());
                     }
                 }
                 Msg::Scanned(items) => {
@@ -286,9 +254,9 @@ fn apply_style(ctx: &egui::Context) {
     let theme = egui::Theme::Dark;
     let mut style = (*ctx.style_of(theme)).clone();
 
-    style.spacing.item_spacing = egui::vec2(8.0, 7.0);
-    style.spacing.button_padding = egui::vec2(12.0, 6.0);
-    style.spacing.interact_size.y = 28.0;
+    style.spacing.item_spacing = egui::vec2(9.0, 8.0);
+    style.spacing.button_padding = egui::vec2(14.0, 7.0);
+    style.spacing.interact_size.y = 30.0;
     style.text_styles = [
         (
             egui::TextStyle::Heading,
@@ -313,21 +281,17 @@ fn apply_style(ctx: &egui::Context) {
     ]
     .into();
 
-    let accent = egui::Color32::from_rgb(96, 165, 250);
-    let surface = egui::Color32::from_rgb(30, 33, 41);
-    let surface_hi = egui::Color32::from_rgb(41, 45, 56);
-
     let mut visuals = egui::Visuals::dark();
-    visuals.panel_fill = egui::Color32::from_rgb(22, 24, 30);
-    visuals.window_fill = surface;
-    visuals.extreme_bg_color = egui::Color32::from_rgb(16, 18, 22);
-    visuals.faint_bg_color = surface;
-    visuals.code_bg_color = surface;
-    visuals.hyperlink_color = accent;
-    visuals.selection.bg_fill = accent.gamma_multiply(0.35);
-    visuals.selection.stroke = egui::Stroke::new(1.0, accent);
-    visuals.window_corner_radius = egui::CornerRadius::same(10);
-    visuals.menu_corner_radius = egui::CornerRadius::same(8);
+    visuals.panel_fill = BG;
+    visuals.window_fill = SURFACE;
+    visuals.extreme_bg_color = egui::Color32::from_rgb(12, 16, 21);
+    visuals.faint_bg_color = SURFACE;
+    visuals.code_bg_color = SURFACE;
+    visuals.hyperlink_color = ACCENT;
+    visuals.selection.bg_fill = ACCENT;
+    visuals.selection.stroke = egui::Stroke::new(1.0, ON_ACCENT);
+    visuals.window_corner_radius = egui::CornerRadius::same(12);
+    visuals.menu_corner_radius = egui::CornerRadius::same(9);
 
     for widget in [
         &mut visuals.widgets.noninteractive,
@@ -336,12 +300,13 @@ fn apply_style(ctx: &egui::Context) {
         &mut visuals.widgets.active,
         &mut visuals.widgets.open,
     ] {
-        widget.corner_radius = egui::CornerRadius::same(7);
+        widget.corner_radius = egui::CornerRadius::same(8);
     }
-    visuals.widgets.inactive.weak_bg_fill = surface_hi;
-    visuals.widgets.hovered.weak_bg_fill = surface_hi.gamma_multiply(1.25);
-    visuals.widgets.active.weak_bg_fill = surface_hi.gamma_multiply(1.45);
-    visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, accent.gamma_multiply(0.7));
+    visuals.widgets.inactive.weak_bg_fill = SURFACE_HI;
+    visuals.widgets.inactive.bg_fill = SURFACE_HI;
+    visuals.widgets.hovered.weak_bg_fill = ACCENT_STRONG;
+    visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, ACCENT);
+    visuals.widgets.active.weak_bg_fill = ACCENT_STRONG;
 
     style.visuals = visuals;
     ctx.set_style_of(theme, style);
@@ -391,6 +356,12 @@ fn install_cjk_font(ctx: &egui::Context) {
     }
 }
 
+fn section(ui: &mut egui::Ui, text: &str) {
+    ui.add_space(12.0);
+    ui.label(egui::RichText::new(text).size(15.0).strong().color(ACCENT));
+    ui.add_space(5.0);
+}
+
 fn file_name(item: &PreviewItem) -> String {
     item.source
         .file_name()
@@ -421,12 +392,16 @@ impl eframe::App for CamDropApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.drain_messages();
-        self.sync_filter();
 
         egui::Panel::top("header").show(ui, |ui| {
-            ui.add_space(6.0);
+            ui.add_space(8.0);
             ui.horizontal(|ui| {
-                ui.heading("CamDrop");
+                ui.label(
+                    egui::RichText::new("CamDrop")
+                        .size(23.0)
+                        .strong()
+                        .color(ACCENT),
+                );
                 ui.add_space(8.0);
                 ui.weak("相机存储卡按日期迁移");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -436,26 +411,34 @@ impl eframe::App for CamDropApp {
                     let (done, total) = self.progress;
                     if total > 0 {
                         let fraction = done as f32 / total as f32;
-                        ui.add(egui::ProgressBar::new(fraction).desired_width(190.0));
+                        ui.add(
+                            egui::ProgressBar::new(fraction)
+                                .desired_width(200.0)
+                                .fill(ACCENT),
+                        );
                         ui.weak(format!("{done}/{total}"));
                     }
                     if (self.scanning || self.busy) && !self.progress_label.is_empty() {
-                        ui.label(&self.progress_label);
+                        ui.label(
+                            egui::RichText::new(self.progress_label.as_str())
+                                .strong()
+                                .color(ACCENT),
+                        );
                     }
                 });
             });
-            ui.add_space(6.0);
+            ui.add_space(8.0);
         });
 
         egui::Panel::bottom("log")
-            .default_size(110.0)
+            .default_size(120.0)
             .min_size(48.0)
-            .max_size(280.0)
+            .max_size(300.0)
             .resizable(true)
             .show(ui, |ui| {
                 ui.add_space(2.0);
                 ui.horizontal(|ui| {
-                    ui.strong("日志");
+                    ui.label(egui::RichText::new("日志").strong().color(ACCENT));
                     if !self.log.is_empty() && ui.small_button("清空").clicked() {
                         self.log.clear();
                     }
@@ -472,170 +455,225 @@ impl eframe::App for CamDropApp {
             });
 
         egui::Panel::left("controls")
-            .default_size(310.0)
-            .min_size(260.0)
+            .default_size(340.0)
+            .min_size(300.0)
             .resizable(true)
             .show(ui, |ui| {
-                ui.add_space(6.0);
-                ui.strong("1 · 选择来源");
-                ui.add_space(4.0);
-
                 egui::ScrollArea::vertical()
-                    .id_salt("cards")
-                    .max_height(140.0)
+                    .id_salt("controls_scroll")
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        if self.cards.is_empty() && !self.detecting {
-                            ui.weak("未检测到存储卡");
+                        let full = ui.available_width();
+
+                        section(ui, "1 · 选择来源");
+
+                        let add =
+                            egui::Button::new(egui::RichText::new("📁  选择来源文件夹").size(15.0))
+                                .min_size(egui::vec2(full, 42.0))
+                                .fill(SURFACE_HI);
+                        if ui.add_enabled(!self.busy, add).clicked()
+                            && let Some(dir) = rfd::FileDialog::new().pick_folder()
+                        {
+                            self.cards.push(Card {
+                                path: dir,
+                                selected: true,
+                            });
+                            self.preview.clear();
+                            self.selected_days.clear();
                         }
-                        for card in &mut self.cards {
-                            ui.checkbox(&mut card.selected, card.path.display().to_string());
+
+                        ui.add_space(4.0);
+                        egui::ScrollArea::vertical()
+                            .id_salt("cards")
+                            .max_height(110.0)
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                if self.cards.is_empty() && !self.detecting {
+                                    ui.weak("未检测到存储卡");
+                                }
+                                for card in &mut self.cards {
+                                    ui.checkbox(
+                                        &mut card.selected,
+                                        card.path.display().to_string(),
+                                    );
+                                }
+                            });
+
+                        if ui
+                            .add_enabled(!self.busy, egui::Button::new("🔄  重新检测存储卡"))
+                            .clicked()
+                        {
+                            self.rescan_cards(&ctx);
                         }
-                    });
 
-                ui.horizontal(|ui| {
-                    if ui
-                        .add_enabled(!self.busy, egui::Button::new("刷新"))
-                        .clicked()
-                    {
-                        self.rescan_cards(&ctx);
-                    }
-                    if ui
-                        .add_enabled(!self.busy, egui::Button::new("添加文件夹…"))
-                        .clicked()
-                        && let Some(dir) = rfd::FileDialog::new().pick_folder()
-                    {
-                        self.cards.push(Card {
-                            path: dir,
-                            selected: true,
-                        });
-                    }
-                });
-
-                ui.add_space(8.0);
-                ui.separator();
-                ui.strong("2 · 扫描");
-                ui.add_space(4.0);
-                let can_scan =
-                    !self.busy && !self.scanning && !self.detecting && !self.cards.is_empty();
-                if ui
-                    .add_enabled(
-                        can_scan,
-                        egui::Button::new("扫描所选来源")
-                            .min_size(egui::vec2(ui.available_width(), 30.0)),
-                    )
-                    .clicked()
-                {
-                    self.scan(&ctx);
-                }
-
-                ui.add_space(8.0);
-                ui.separator();
-                ui.strong("3 · 迁移设置");
-                ui.add_space(4.0);
-                ui.label("目标目录");
-                ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut self.target).desired_width(160.0));
-                    if ui.button("浏览…").clicked()
-                        && let Some(dir) = rfd::FileDialog::new().pick_folder()
-                    {
-                        self.target = dir.display().to_string();
-                    }
-                });
-
-                ui.label("方式");
-                ui.horizontal(|ui| {
-                    ui.radio_value(&mut self.copy_only, false, "移动（删除源文件）");
-                    ui.radio_value(&mut self.copy_only, true, "复制（保留源文件）");
-                });
-
-                ui.label("时间筛选");
-                let (years, months, days) = self.available_dates();
-                ui.horizontal(|ui| {
-                    egui::ComboBox::from_id_salt("filter_mode")
-                        .selected_text(match self.filter_mode {
-                            FilterMode::All => "全部",
-                            FilterMode::Year => "按年",
-                            FilterMode::Month => "按月",
-                            FilterMode::Day => "按天",
-                        })
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut self.filter_mode, FilterMode::All, "全部");
-                            ui.selectable_value(&mut self.filter_mode, FilterMode::Year, "按年");
-                            ui.selectable_value(&mut self.filter_mode, FilterMode::Month, "按月");
-                            ui.selectable_value(&mut self.filter_mode, FilterMode::Day, "按天");
-                        });
-                    if matches!(
-                        self.filter_mode,
-                        FilterMode::Year | FilterMode::Month | FilterMode::Day
-                    ) {
-                        egui::ComboBox::from_id_salt("filter_year")
-                            .width(70.0)
-                            .selected_text(self.filter_year.to_string())
-                            .show_ui(ui, |ui| {
-                                for year in &years {
-                                    ui.selectable_value(
-                                        &mut self.filter_year,
-                                        *year,
-                                        year.to_string(),
-                                    );
-                                }
-                            });
-                    }
-                    if matches!(self.filter_mode, FilterMode::Month | FilterMode::Day) {
-                        egui::ComboBox::from_id_salt("filter_month")
-                            .width(58.0)
-                            .selected_text(format!("{:02}", self.filter_month))
-                            .show_ui(ui, |ui| {
-                                for month in &months {
-                                    ui.selectable_value(
-                                        &mut self.filter_month,
-                                        *month,
-                                        format!("{month:02}"),
-                                    );
-                                }
-                            });
-                    }
-                    if matches!(self.filter_mode, FilterMode::Day) {
-                        egui::ComboBox::from_id_salt("filter_day")
-                            .width(58.0)
-                            .selected_text(format!("{:02}", self.filter_day))
-                            .show_ui(ui, |ui| {
-                                for day in &days {
-                                    ui.selectable_value(
-                                        &mut self.filter_day,
-                                        *day,
-                                        format!("{day:02}"),
-                                    );
-                                }
-                            });
-                    }
-                });
-
-                ui.add_space(8.0);
-                let filter = self.current_filter();
-                let shown_count = self
-                    .preview
-                    .iter()
-                    .filter(|item| filter.matches(item.date))
-                    .count();
-                let can_migrate =
-                    !self.busy && !self.scanning && !self.cards.is_empty() && shown_count > 0;
-                let start = ui
-                    .add_enabled_ui(can_migrate, |ui| {
-                        ui.add_sized(
-                            [ui.available_width(), 36.0],
-                            egui::Button::new(egui::RichText::new("开始迁移").size(16.0).strong()),
+                        section(ui, "2 · 扫描");
+                        let can_scan = !self.busy
+                            && !self.scanning
+                            && !self.detecting
+                            && !self.cards.is_empty();
+                        let scan = egui::Button::new(
+                            egui::RichText::new("🔍  扫描所选来源")
+                                .size(15.0)
+                                .color(ON_ACCENT),
                         )
-                    })
-                    .inner;
-                if start.clicked() {
-                    self.migrate(&ctx);
-                }
-                if let Some(summary) = &self.summary {
-                    ui.add_space(4.0);
-                    ui.weak(summary);
-                }
+                        .min_size(egui::vec2(full, 38.0))
+                        .fill(ACCENT);
+                        if ui.add_enabled(can_scan, scan).clicked() {
+                            self.scan(&ctx);
+                        }
+
+                        section(ui, "3 · 按时间筛选");
+                        if self.preview.is_empty() {
+                            ui.weak("扫描后可在此按时间筛选");
+                        } else {
+                            let tree = self.available_dates();
+                            let selected = self.selected_days.clone();
+                            let toggles: RefCell<Vec<(Vec<NaiveDate>, bool)>> =
+                                RefCell::new(Vec::new());
+
+                            for (year, months) in &tree {
+                                let year_days: Vec<NaiveDate> = months
+                                    .iter()
+                                    .flat_map(|(m, days)| {
+                                        days.iter().map(move |d| {
+                                            NaiveDate::from_ymd_opt(*year, *m, *d).unwrap()
+                                        })
+                                    })
+                                    .collect();
+                                let year_all = year_days.iter().all(|d| selected.contains(d));
+                                let mut check = year_all;
+                                if ui
+                                    .checkbox(
+                                        &mut check,
+                                        egui::RichText::new(format!("{year} 年")).strong(),
+                                    )
+                                    .changed()
+                                {
+                                    toggles.borrow_mut().push((year_days, year_all));
+                                }
+
+                                for (month, days) in months {
+                                    let month_days: Vec<NaiveDate> = days
+                                        .iter()
+                                        .map(|d| {
+                                            NaiveDate::from_ymd_opt(*year, *month, *d).unwrap()
+                                        })
+                                        .collect();
+                                    let month_all = month_days.iter().all(|d| selected.contains(d));
+                                    ui.horizontal(|ui| {
+                                        ui.add_space(18.0);
+                                        let mut check = month_all;
+                                        if ui
+                                            .checkbox(&mut check, format!("{month:02} 月"))
+                                            .changed()
+                                        {
+                                            toggles
+                                                .borrow_mut()
+                                                .push((month_days.clone(), month_all));
+                                        }
+                                    });
+
+                                    for day in days {
+                                        let date =
+                                            NaiveDate::from_ymd_opt(*year, *month, *day).unwrap();
+                                        let was_selected = selected.contains(&date);
+                                        let mut check = was_selected;
+                                        ui.horizontal(|ui| {
+                                            ui.add_space(38.0);
+                                            if ui
+                                                .checkbox(&mut check, format!("{day:02} 日"))
+                                                .changed()
+                                            {
+                                                toggles
+                                                    .borrow_mut()
+                                                    .push((vec![date], was_selected));
+                                            }
+                                        });
+                                    }
+                                }
+                            }
+
+                            for (days, was_all) in toggles.into_inner() {
+                                if was_all {
+                                    for day in &days {
+                                        self.selected_days.remove(day);
+                                    }
+                                } else {
+                                    for day in &days {
+                                        self.selected_days.insert(*day);
+                                    }
+                                }
+                            }
+
+                            ui.add_space(4.0);
+                            if self.selected_days.is_empty() {
+                                ui.weak("未筛选：迁移全部时间");
+                            } else {
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "已选 {} 天",
+                                            self.selected_days.len()
+                                        ))
+                                        .color(ACCENT),
+                                    );
+                                    if ui.small_button("清除筛选").clicked() {
+                                        self.selected_days.clear();
+                                    }
+                                });
+                            }
+                        }
+
+                        section(ui, "4 · 迁移");
+                        ui.label("目标目录");
+                        ui.horizontal(|ui| {
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.target)
+                                    .desired_width(full - 74.0),
+                            );
+                            if ui.button("浏览…").clicked()
+                                && let Some(dir) = rfd::FileDialog::new().pick_folder()
+                            {
+                                self.target = dir.display().to_string();
+                            }
+                        });
+
+                        ui.add_space(2.0);
+                        ui.label("方式");
+                        ui.horizontal(|ui| {
+                            ui.radio_value(&mut self.copy_only, false, "移动（删除源文件）");
+                            ui.radio_value(&mut self.copy_only, true, "复制（保留源文件）");
+                        });
+
+                        ui.add_space(8.0);
+                        let filter = self.current_filter();
+                        let shown_count = self
+                            .preview
+                            .iter()
+                            .filter(|item| filter.matches(item.date))
+                            .count();
+                        let can_migrate = !self.busy
+                            && !self.scanning
+                            && !self.cards.is_empty()
+                            && shown_count > 0;
+
+                        let migrate = egui::Button::new(
+                            egui::RichText::new("▶  开始迁移")
+                                .size(17.0)
+                                .strong()
+                                .color(ON_ACCENT),
+                        )
+                        .min_size(egui::vec2(full, 44.0))
+                        .fill(ACCENT);
+                        if ui.add_enabled(can_migrate, migrate).clicked() {
+                            self.migrate(&ctx);
+                        }
+                        if let Some(summary) = &self.summary {
+                            ui.add_space(4.0);
+                            ui.label(egui::RichText::new(summary.as_str()).color(ACCENT));
+                        }
+                        ui.add_space(10.0);
+                    });
             });
 
         egui::CentralPanel::default().show(ui, |ui| {
@@ -652,23 +690,35 @@ impl eframe::App for CamDropApp {
                 .map(|i| i.size)
                 .sum();
 
-            ui.add_space(4.0);
+            ui.add_space(6.0);
             ui.horizontal(|ui| {
-                ui.strong("预览");
-                ui.add_space(10.0);
+                ui.label(
+                    egui::RichText::new("预览")
+                        .size(17.0)
+                        .strong()
+                        .color(ACCENT),
+                );
+                ui.add_space(12.0);
                 ui.selectable_value(&mut self.view, ViewMode::Files, "文件");
                 ui.selectable_value(&mut self.view, ViewMode::Tree, "迁移后目录");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if self.scanning {
                         ui.spinner();
                     }
-                    ui.weak(format!("{shown_len} 个文件 · {}", human_size(total_size)));
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{shown_len} 个文件 · {}",
+                            human_size(total_size)
+                        ))
+                        .color(ACCENT),
+                    );
                 });
             });
+            ui.add_space(4.0);
             ui.separator();
 
             if shown_len == 0 {
-                ui.add_space(20.0);
+                ui.add_space(24.0);
                 if self.scanning {
                     ui.weak("正在扫描…");
                 } else if self.preview.is_empty() {
@@ -694,7 +744,7 @@ impl eframe::App for CamDropApp {
                             egui::Grid::new("preview_grid")
                                 .num_columns(5)
                                 .striped(true)
-                                .spacing([18.0, 5.0])
+                                .spacing([18.0, 6.0])
                                 .show(ui, |ui| {
                                     ui.strong("文件名");
                                     ui.strong("大小");
@@ -707,7 +757,9 @@ impl eframe::App for CamDropApp {
                                         ui.label(file_name(item));
                                         ui.label(human_size(item.size));
                                         ui.label(&item.captured);
-                                        ui.label(target_path(item));
+                                        ui.label(
+                                            egui::RichText::new(target_path(item)).color(ACCENT),
+                                        );
                                         ui.label(if item.has_xmp { "有" } else { "—" });
                                         ui.end_row();
                                     }
@@ -725,20 +777,24 @@ impl eframe::App for CamDropApp {
                         .show(ui, |ui| {
                             for (folder, items) in groups {
                                 let folder_size: u64 = items.iter().map(|i| i.size).sum();
-                                egui::CollapsingHeader::new(format!(
+                                let header = egui::RichText::new(format!(
                                     "{folder}   ({} 个 · {})",
                                     items.len(),
                                     human_size(folder_size)
                                 ))
-                                .default_open(true)
-                                .show(ui, |ui| {
-                                    for item in items {
-                                        ui.horizontal(|ui| {
-                                            ui.label(file_name(item));
-                                            ui.weak(human_size(item.size));
-                                        });
-                                    }
-                                });
+                                .strong()
+                                .color(ACCENT);
+                                egui::CollapsingHeader::new(header).default_open(true).show(
+                                    ui,
+                                    |ui| {
+                                        for item in items {
+                                            ui.horizontal(|ui| {
+                                                ui.label(file_name(item));
+                                                ui.weak(human_size(item.size));
+                                            });
+                                        }
+                                    },
+                                );
                             }
                         });
                 }
