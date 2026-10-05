@@ -1,7 +1,7 @@
 # 发布新版本
 
 发布由 **推送 tag 触发** GitHub Actions：本地把版本号改好、提交、打 `vX.Y.Z` 标签并 push，
-Actions 就会在四个平台编译、打包并创建 GitHub Release。全程使用你已保存的 git 凭据，
+Actions 就会在 Windows / Linux / macOS 编译、打包并创建 GitHub Release。全程使用你已保存的 git 凭据，
 不需要 GitHub token，也不会每次让你重新登录。
 
 ## 推荐方式：本地一行命令
@@ -39,13 +39,12 @@ git push && git push origin vX.Y.Z
 `.github/workflows/release.yml` 监听 `push` 的 `v*` 标签：
 
 1. **meta**：从 tag 解析出 `tag` / `version`。
-2. **build**（矩阵，四平台）：
+2. **build**（矩阵，三平台）：
    | 平台 | 产物 |
    |---|---|
    | Windows x86_64 | `camdrop-<tag>-windows-x86_64.zip` |
    | Linux x86_64 | `camdrop_<ver>_amd64.deb`、`camdrop-<ver>-1.x86_64.rpm`、`CamDrop-<ver>-x86_64.AppImage`、`camdrop-<tag>-linux-x86_64.tar.gz` |
-   | macOS x86_64 | `camdrop-<tag>-macos-x86_64.tar.gz` |
-   | macOS aarch64 | `camdrop-<tag>-macos-aarch64.tar.gz` |
+   | macOS arm64 | `camdrop-<tag>-macos-aarch64.tar.gz` |
 3. **release**：汇总所有产物，创建 GitHub Release（自动生成 release notes）。
 
 zip / tar.gz 里包含：可执行文件、`README.md`、`LICENSE`、`assets/icon.png`。
@@ -70,7 +69,7 @@ gh workflow run release.yml -f bump=patch    # 需要 gh 且已登录
 
 ## 产物说明与已知限制
 
-- **架构**：Linux 只出 **x86_64** 的 deb/rpm/AppImage；macOS 同时出 Intel 与 Apple Silicon。
+- **架构**：Linux 只出 **x86_64** 的 deb/rpm/AppImage；macOS 只出 Apple Silicon（arm64）。
 - **AppImage / 运行依赖**：图形界面走 OpenGL，**不打包显卡驱动**（由系统提供）；
   依赖 X11/Wayland、`libGL`。deb/rpm 已声明相关依赖。
 - **中文字体**：界面中文依赖**系统字体**（不内嵌），缺字体会显示方框。

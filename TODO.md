@@ -2,6 +2,8 @@
 
 Remaining work for CamDrop. Check items off as they are done.
 
+opencode -s ses_ef4df2c25ffek32Ph1tulzYZw6
+
 ## Release / CI
 
 - [ ] Verify the tag-push release flow: run `pwsh scripts/release.ps1 patch` and confirm
@@ -14,7 +16,7 @@ Remaining work for CamDrop. Check items off as they are done.
       deb/rpm/AppImage steps have not been verified yet (first run was still in progress).
 - [ ] Confirm the repository Actions workflow permissions are set to **Read and write**
       (required to create the Release).
-- [ ] Drop macOS x86_64 (Intel) support: remove the `macos-13` / `x86_64-apple-darwin`
+- [x] Drop macOS x86_64 (Intel) support: remove the `macos-13` / `x86_64-apple-darwin`
       entry from the build matrix in `.github/workflows/release.yml`, leaving Apple
       Silicon only (`macos-14` / `aarch64-apple-darwin`). Update README / RELEASING docs
       to reflect macOS arm64 only.
