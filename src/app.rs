@@ -457,6 +457,18 @@ fn action_button(
     response
 }
 
+/// A full-width toggle button for a detected card, filled with the accent when
+/// selected.
+fn toggle_button(ui: &mut egui::Ui, label: &str, selected: bool, height: f32) -> egui::Response {
+    let fill = if selected { ACCENT } else { SURFACE_HI };
+    let text = if selected {
+        ON_ACCENT
+    } else {
+        egui::Color32::from_gray(214)
+    };
+    action_button(ui, label, fill, text, height, true)
+}
+
 fn file_name(item: &PreviewItem) -> String {
     item.source
         .file_name()
@@ -522,6 +534,12 @@ impl eframe::App for CamDropApp {
                     }
                 });
             });
+            ui.add_space(6.0);
+            ui.label(
+                egui::RichText::new(self.status_line())
+                    .size(12.5)
+                    .color(ACCENT),
+            );
             ui.add_space(8.0);
         });
 
@@ -578,28 +596,31 @@ impl eframe::App for CamDropApp {
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         ui.add_space(8.0);
-                        egui::Frame::group(ui.style())
-                            .fill(SURFACE)
-                            .corner_radius(egui::CornerRadius::same(8))
+                        step(ui, "1 · 选择来源", "点击检测到的存储卡加入迁移，可多选");
+                        egui::ScrollArea::vertical()
+                            .id_salt("cards")
+                            .max_height(170.0)
+                            .auto_shrink([false, false])
                             .show(ui, |ui| {
-                                ui.set_width(ui.available_width());
-                                ui.label(
-                                    egui::RichText::new(self.status_line())
-                                        .size(12.5)
-                                        .color(ACCENT),
-                                );
+                                if self.cards.is_empty() && !self.detecting {
+                                    ui.weak("未检测到存储卡");
+                                }
+                                for card in &mut self.cards {
+                                    let label = format!(
+                                        "{}  {}",
+                                        if card.selected { "●" } else { "○" },
+                                        card.path.display()
+                                    );
+                                    if toggle_button(ui, &label, card.selected, 44.0).clicked() {
+                                        card.selected = !card.selected;
+                                    }
+                                }
                             });
 
-                        step(ui, "1 · 选择来源", "勾选要迁移的存储卡，或手动选择文件夹");
-                        if action_button(
-                            ui,
-                            "📁  选择来源文件夹",
-                            ACCENT,
-                            ON_ACCENT,
-                            56.0,
-                            !self.busy,
-                        )
-                        .clicked()
+                        ui.add_space(6.0);
+                        if ui
+                            .add_enabled(!self.busy, egui::Button::new("📁  手动选择文件夹…"))
+                            .clicked()
                             && let Some(dir) = rfd::FileDialog::new().pick_folder()
                         {
                             self.cards.push(Card {
@@ -609,23 +630,6 @@ impl eframe::App for CamDropApp {
                             self.preview.clear();
                             self.selected_days.clear();
                         }
-
-                        ui.add_space(6.0);
-                        egui::ScrollArea::vertical()
-                            .id_salt("cards")
-                            .max_height(96.0)
-                            .auto_shrink([false, false])
-                            .show(ui, |ui| {
-                                if self.cards.is_empty() && !self.detecting {
-                                    ui.weak("未检测到存储卡");
-                                }
-                                for card in &mut self.cards {
-                                    ui.checkbox(
-                                        &mut card.selected,
-                                        card.path.display().to_string(),
-                                    );
-                                }
-                            });
 
                         if ui
                             .add_enabled(!self.busy, egui::Button::new("🔄  重新检测存储卡"))
