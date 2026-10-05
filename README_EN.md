@@ -19,7 +19,7 @@ CamDrop is a camera memory card migration tool. After you insert a card, it scan
 * Safe cross-drive moves: falls back to copy + delete when `rename` returns CrossesDevices.
 * Read-only handling: clears the read-only attribute and retries when deletion fails.
 * Collision handling: appends `_1`, `_2` instead of overwriting an existing file.
-* Date filter: migrate only the files of a chosen year, month or day; the preview updates with it.
+* Date filter: tick the years, months or days to include; the preview follows it.
 * Move or copy: pick one, where move deletes the card files and copy keeps them.
 
 Migration handles `.jpg` `.jpeg` `.nef` `.cr3` `.arw` `.dng` `.mp4` `.mov`; detection also recognises `.raf` `.orf` `.rw2` `.pef` `.srw` `.nrw`.
@@ -60,7 +60,7 @@ After launching the program:
 
 1. Select the source cards under "Select source"; click "Add folder" if none was detected.
 2. Click "Scan selected"; the center area lists the file preview and the destination layout.
-3. Confirm the destination folder (defaults to `RAW` next to the executable), pick "Move" or "Copy", and narrow the files with the date filter (all / year / month / day).
+3. Confirm the destination folder (defaults to `RAW` next to the executable), pick "Move" or "Copy", and tick the dates to include under the date filter.
 4. Click "Start migration" and watch the log at the bottom for the result of each file.
 
 "Move" deletes the original files from the card; "Copy" keeps them and writes a second set to the destination. The date filter only changes the scope of this run, and the preview follows it.
