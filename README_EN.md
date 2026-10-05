@@ -7,21 +7,21 @@
 
 [简体中文](README.md)
 
-CamDrop is a camera memory card archiver. After you insert a card, it scans the mounted disks to find the card, reads each photo's capture time, sorts the photos and videos into `year/month_day` folders, moves them to the destination, and takes the matching `.xmp` sidecars along. It is written in Rust, compiles to a single executable, and ships with a small egui interface.
+CamDrop is a camera memory card migration tool. After you insert a card, it scans the mounted disks to find the card, reads each photo's capture time, sorts the photos and videos into `year/month_day` folders, moves them to the destination, and takes the matching `.xmp` sidecars along. It is written in Rust, compiles to a single executable, and ships with a small egui interface.
 
 [Features](#features) • [Installation](#installation) • [Usage](#usage) • [Development](#development) • [License](#license)
 
 ## Features
 
 * Automatic card detection: scans mounted disks and identifies the card by RAW files such as `.nef`, `.cr3`, `.arw`, `.dng`.
-* Date-based archiving: uses EXIF `DateTimeOriginal` to build the folder, falling back to the file modification time.
+* Date-based migration: uses EXIF `DateTimeOriginal` to build the folder, falling back to the file modification time.
 * XMP sync: moves the matching `.xmp` with each photo, then rescans the card and re-matches any leftover sidecars.
 * Safe cross-drive moves: falls back to copy + delete when `rename` returns CrossesDevices.
 * Read-only handling: clears the read-only attribute and retries when deletion fails.
 * Collision handling: appends `_1`, `_2` instead of overwriting an existing file.
-* Dry run: prints the archive plan without touching any file.
+* Dry run: prints the migration plan without touching any file.
 
-Archiving handles `.jpg` `.jpeg` `.nef` `.cr3` `.arw` `.dng` `.mp4` `.mov`; detection also recognises `.raf` `.orf` `.rw2` `.pef` `.srw` `.nrw`.
+Migration handles `.jpg` `.jpeg` `.nef` `.cr3` `.arw` `.dng` `.mp4` `.mov`; detection also recognises `.raf` `.orf` `.rw2` `.pef` `.srw` `.nrw`.
 
 ## Installation
 
@@ -57,15 +57,16 @@ cargo install --git https://github.com/WuCaiCaiCai/CamDrop.git
 
 After launching the program:
 
-1. Wait for the scan to finish; detected cards are listed.
-2. Select the cards to archive, or click "Add folder" if none was detected.
-3. Confirm the destination folder, which defaults to `RAW` next to the executable.
-4. Toggle "Copy only" or "Dry run" as needed.
-5. Click "Start" and watch the log area for the result of each file.
+1. Select the source cards under "Select source"; click "Add folder" if none was detected.
+2. Click "Scan selected"; the center area lists the file preview and the destination layout.
+3. Confirm the destination folder (defaults to `RAW` next to the executable) and toggle "Copy only" or "Dry run" as needed.
+4. Click "Start migration" and watch the log at the bottom for the result of each file.
 
 "Copy only" keeps the card files and copies a second set to the destination. "Dry run" prints the plan without moving or copying anything.
 
-### Archive layout
+The preview has two views. "Files" lists each file's name, size, capture time and destination path; "Destination layout" groups the files by their target folder.
+
+### Destination layout
 
 ```text
 RAW/
@@ -104,7 +105,7 @@ The release profile enables size optimizations (`opt-level = "z"`, LTO, `strip`)
 ```text
 src/
 ├── main.rs        Entry point and window setup
-├── app.rs         UI state, background archive thread, log
+├── app.rs         UI state, background migration thread, log
 ├── lib.rs         Module exports and default extensions
 ├── detector.rs    Mount enumeration and RAW signature detection
 ├── metadata.rs    EXIF capture time, mtime fallback, folder name
@@ -116,7 +117,7 @@ tests/
 
 ## Notes
 
-* Archiving moves files and removes them from the card by default. Try "Dry run" first.
+* Migration moves files and removes them from the card by default. Try "Dry run" first.
 * On Windows, data disks that contain RAW files are also listed as candidates.
 * Without a Chinese font installed, the UI text shows as boxes.
 
