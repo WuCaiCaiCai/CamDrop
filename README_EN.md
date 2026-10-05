@@ -65,9 +65,9 @@ After launching the program:
 
 "Move" deletes the original files from the card; "Copy" keeps them and writes a second set to the destination. The date filter only changes the scope of this run, and the preview follows it.
 
-The preview has two views. "Files" lists each file's name, size, capture time and destination path; "Destination layout" groups the files by their target folder.
+The preview has two views. "Files" lists each file's name, size, capture time and destination path; "Directory preview" groups the files by their target folder.
 
-### Destination layout
+### Directory layout
 
 ```text
 RAW/

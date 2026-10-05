@@ -391,14 +391,70 @@ fn install_cjk_font(ctx: &egui::Context) {
 }
 
 fn step(ui: &mut egui::Ui, title: &str, hint: &str) {
-    ui.add_space(12.0);
-    ui.label(egui::RichText::new(title).size(15.0).strong().color(ACCENT));
+    ui.add_space(6.0);
+    ui.separator();
+    ui.add_space(8.0);
+    ui.label(egui::RichText::new(title).size(14.5).strong().color(ACCENT));
     ui.label(egui::RichText::new(hint).size(11.5).weak());
-    ui.add_space(5.0);
+    ui.add_space(6.0);
 }
 
-fn big_button(text: egui::RichText, fill: egui::Color32) -> egui::Button<'static> {
-    egui::Button::new(text).fill(fill).corner_radius(9.0)
+/// A hand-drawn full-width button with clear hover and press feedback.
+fn action_button(
+    ui: &mut egui::Ui,
+    label: &str,
+    fill: egui::Color32,
+    text_color: egui::Color32,
+    height: f32,
+    enabled: bool,
+) -> egui::Response {
+    let width = ui.available_width();
+    let sense = if enabled {
+        egui::Sense::click()
+    } else {
+        egui::Sense::hover()
+    };
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), sense);
+
+    let hovering = enabled && response.hovered();
+    let pressing = enabled && response.is_pointer_button_down_on();
+    let color = if !enabled {
+        fill.gamma_multiply(0.4)
+    } else if pressing {
+        fill.gamma_multiply(0.72)
+    } else if hovering {
+        fill.gamma_multiply(1.2)
+    } else {
+        fill
+    };
+
+    let radius = egui::CornerRadius::same(10);
+    let painter = ui.painter();
+    painter.rect_filled(rect, radius, color);
+    if enabled && (hovering || pressing) {
+        painter.rect_stroke(
+            rect,
+            radius,
+            egui::Stroke::new(1.5, egui::Color32::from_white_alpha(90)),
+            egui::StrokeKind::Inside,
+        );
+    }
+    painter.text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        label,
+        egui::FontId::proportional(16.0),
+        if enabled {
+            text_color
+        } else {
+            text_color.gamma_multiply(0.5)
+        },
+    );
+
+    if hovering {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    response
 }
 
 fn file_name(item: &PreviewItem) -> String {
@@ -470,7 +526,7 @@ impl eframe::App for CamDropApp {
         });
 
         egui::Panel::bottom("log")
-            .default_size(110.0)
+            .default_size(104.0)
             .min_size(48.0)
             .max_size(300.0)
             .resizable(true)
@@ -494,30 +550,56 @@ impl eframe::App for CamDropApp {
             });
 
         egui::Panel::left("controls")
-            .default_size(348.0)
+            .default_size(352.0)
             .min_size(310.0)
             .resizable(true)
             .show(ui, |ui| {
+                // Primary action pinned to the bottom of the panel.
+                egui::Panel::bottom("migrate_bar").show(ui, |ui| {
+                    ui.add_space(8.0);
+                    if let Some(summary) = &self.summary {
+                        ui.label(egui::RichText::new(summary.as_str()).color(ACCENT));
+                        ui.add_space(4.0);
+                    }
+                    let can_migrate = !self.busy
+                        && !self.scanning
+                        && !self.cards.is_empty()
+                        && self.filtered_count() > 0;
+                    if action_button(ui, "▶  开始迁移", ACCENT, ON_ACCENT, 52.0, can_migrate)
+                        .clicked()
+                    {
+                        self.migrate(&ctx);
+                    }
+                    ui.add_space(8.0);
+                });
+
                 egui::ScrollArea::vertical()
                     .id_salt("controls_scroll")
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        let full = ui.available_width();
-
                         ui.add_space(8.0);
-                        ui.label(
-                            egui::RichText::new(self.status_line())
-                                .size(12.5)
-                                .color(ACCENT),
-                        );
+                        egui::Frame::group(ui.style())
+                            .fill(SURFACE)
+                            .corner_radius(egui::CornerRadius::same(8))
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width());
+                                ui.label(
+                                    egui::RichText::new(self.status_line())
+                                        .size(12.5)
+                                        .color(ACCENT),
+                                );
+                            });
 
                         step(ui, "1 · 选择来源", "勾选要迁移的存储卡，或手动选择文件夹");
-                        let add = big_button(
-                            egui::RichText::new("📁  选择来源文件夹").size(15.0),
-                            SURFACE_HI,
+                        if action_button(
+                            ui,
+                            "📁  选择来源文件夹",
+                            ACCENT,
+                            ON_ACCENT,
+                            56.0,
+                            !self.busy,
                         )
-                        .min_size(egui::vec2(full, 44.0));
-                        if ui.add_enabled(!self.busy, add).clicked()
+                        .clicked()
                             && let Some(dir) = rfd::FileDialog::new().pick_folder()
                         {
                             self.cards.push(Card {
@@ -531,7 +613,7 @@ impl eframe::App for CamDropApp {
                         ui.add_space(6.0);
                         egui::ScrollArea::vertical()
                             .id_salt("cards")
-                            .max_height(104.0)
+                            .max_height(96.0)
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
                                 if self.cards.is_empty() && !self.detecting {
@@ -557,87 +639,110 @@ impl eframe::App for CamDropApp {
                             && !self.scanning
                             && !self.detecting
                             && !self.cards.is_empty();
-                        let scan = big_button(
-                            egui::RichText::new("🔍  扫描所选来源")
-                                .size(15.0)
-                                .color(ON_ACCENT),
-                            ACCENT,
-                        )
-                        .min_size(egui::vec2(full, 42.0));
-                        if ui.add_enabled(can_scan, scan).clicked() {
+                        if action_button(ui, "🔍  扫描所选来源", SURFACE_HI, ACCENT, 46.0, can_scan)
+                            .clicked()
+                        {
                             self.scan(&ctx);
                         }
 
-                        step(ui, "3 · 时间筛选", "勾选要迁移的日期，不勾选表示全部");
+                        // Step 3: collapsible date filter.
+                        ui.add_space(6.0);
+                        ui.separator();
+                        ui.add_space(8.0);
                         if self.preview.is_empty() {
-                            ui.weak("扫描后可在此按时间筛选");
+                            ui.label(
+                                egui::RichText::new("3 · 时间筛选")
+                                    .size(14.5)
+                                    .strong()
+                                    .color(ACCENT),
+                            );
+                            ui.label(
+                                egui::RichText::new("扫描后可在此按时间筛选")
+                                    .size(11.5)
+                                    .weak(),
+                            );
                         } else {
                             let tree = self.available_dates();
                             let selected = self.selected_days.clone();
                             let toggles: RefCell<Vec<(Vec<NaiveDate>, bool)>> =
                                 RefCell::new(Vec::new());
 
-                            for (year, months) in &tree {
-                                let year_days: Vec<NaiveDate> = months
-                                    .iter()
-                                    .flat_map(|(m, days)| {
-                                        days.iter().map(move |d| {
-                                            NaiveDate::from_ymd_opt(*year, *m, *d).unwrap()
-                                        })
-                                    })
-                                    .collect();
-                                let year_all = year_days.iter().all(|d| selected.contains(d));
-                                let mut check = year_all;
-                                if ui
-                                    .checkbox(
-                                        &mut check,
-                                        egui::RichText::new(format!("{year} 年")).strong(),
-                                    )
-                                    .changed()
-                                {
-                                    toggles.borrow_mut().push((year_days, year_all));
-                                }
-
-                                for (month, days) in months {
-                                    let month_days: Vec<NaiveDate> = days
+                            egui::CollapsingHeader::new(
+                                egui::RichText::new(format!(
+                                    "3 · 时间筛选（已选 {} 天）",
+                                    self.selected_days.len()
+                                ))
+                                .size(14.5)
+                                .strong()
+                                .color(ACCENT),
+                            )
+                            .id_salt("filter_header")
+                            .default_open(false)
+                            .show(ui, |ui| {
+                                ui.add_space(4.0);
+                                for (year, months) in &tree {
+                                    let year_days: Vec<NaiveDate> = months
                                         .iter()
-                                        .map(|d| {
-                                            NaiveDate::from_ymd_opt(*year, *month, *d).unwrap()
+                                        .flat_map(|(m, days)| {
+                                            days.iter().map(move |d| {
+                                                NaiveDate::from_ymd_opt(*year, *m, *d).unwrap()
+                                            })
                                         })
                                         .collect();
-                                    let month_all = month_days.iter().all(|d| selected.contains(d));
-                                    ui.horizontal(|ui| {
-                                        ui.add_space(18.0);
-                                        let mut check = month_all;
-                                        if ui
-                                            .checkbox(&mut check, format!("{month:02} 月"))
-                                            .changed()
-                                        {
-                                            toggles
-                                                .borrow_mut()
-                                                .push((month_days.clone(), month_all));
-                                        }
-                                    });
+                                    let year_all = year_days.iter().all(|d| selected.contains(d));
+                                    let mut check = year_all;
+                                    if ui
+                                        .checkbox(
+                                            &mut check,
+                                            egui::RichText::new(format!("{year} 年")).strong(),
+                                        )
+                                        .changed()
+                                    {
+                                        toggles.borrow_mut().push((year_days, year_all));
+                                    }
 
-                                    for day in days {
-                                        let date =
-                                            NaiveDate::from_ymd_opt(*year, *month, *day).unwrap();
-                                        let was_selected = selected.contains(&date);
-                                        let mut check = was_selected;
+                                    for (month, days) in months {
+                                        let month_days: Vec<NaiveDate> = days
+                                            .iter()
+                                            .map(|d| {
+                                                NaiveDate::from_ymd_opt(*year, *month, *d).unwrap()
+                                            })
+                                            .collect();
+                                        let month_all =
+                                            month_days.iter().all(|d| selected.contains(d));
                                         ui.horizontal(|ui| {
-                                            ui.add_space(38.0);
+                                            ui.add_space(18.0);
+                                            let mut check = month_all;
                                             if ui
-                                                .checkbox(&mut check, format!("{day:02} 日"))
+                                                .checkbox(&mut check, format!("{month:02} 月"))
                                                 .changed()
                                             {
                                                 toggles
                                                     .borrow_mut()
-                                                    .push((vec![date], was_selected));
+                                                    .push((month_days.clone(), month_all));
                                             }
                                         });
+
+                                        for day in days {
+                                            let date = NaiveDate::from_ymd_opt(*year, *month, *day)
+                                                .unwrap();
+                                            let was_selected = selected.contains(&date);
+                                            let mut check = was_selected;
+                                            ui.horizontal(|ui| {
+                                                ui.add_space(38.0);
+                                                if ui
+                                                    .checkbox(&mut check, format!("{day:02} 日"))
+                                                    .changed()
+                                                {
+                                                    toggles
+                                                        .borrow_mut()
+                                                        .push((vec![date], was_selected));
+                                                }
+                                            });
+                                        }
                                     }
                                 }
-                            }
+                            });
 
                             for (days, was_all) in toggles.into_inner() {
                                 if was_all {
@@ -651,26 +756,14 @@ impl eframe::App for CamDropApp {
                                 }
                             }
 
-                            ui.add_space(4.0);
-                            if self.selected_days.is_empty() {
-                                ui.weak("未筛选：迁移全部时间");
-                            } else {
-                                ui.horizontal(|ui| {
-                                    ui.label(
-                                        egui::RichText::new(format!(
-                                            "已选 {} 天",
-                                            self.selected_days.len()
-                                        ))
-                                        .color(ACCENT),
-                                    );
-                                    if ui.small_button("清除筛选").clicked() {
-                                        self.selected_days.clear();
-                                    }
-                                });
+                            if !self.selected_days.is_empty()
+                                && ui.small_button("清除筛选").clicked()
+                            {
+                                self.selected_days.clear();
                             }
                         }
 
-                        step(ui, "4 · 执行迁移", "选择目标目录与方式，然后开始");
+                        step(ui, "4 · 迁移设置", "选择方式与目标目录");
                         ui.label("方式");
                         ui.horizontal(|ui| {
                             ui.radio_value(&mut self.copy_only, false, "移动（删除源文件）");
@@ -679,39 +772,21 @@ impl eframe::App for CamDropApp {
 
                         ui.add_space(6.0);
                         ui.label("目标目录");
-                        let pick = big_button(
-                            egui::RichText::new("📂  选择目标文件夹").size(15.0),
+                        if action_button(
+                            ui,
+                            "📂  选择目标文件夹",
                             SURFACE_HI,
+                            ACCENT,
+                            46.0,
+                            !self.busy,
                         )
-                        .min_size(egui::vec2(full, 42.0));
-                        if ui.add_enabled(!self.busy, pick).clicked()
+                        .clicked()
                             && let Some(dir) = rfd::FileDialog::new().pick_folder()
                         {
                             self.target = dir.display().to_string();
                         }
                         ui.label(egui::RichText::new(&self.target).size(11.5).weak());
-
-                        ui.add_space(10.0);
-                        let can_migrate = !self.busy
-                            && !self.scanning
-                            && !self.cards.is_empty()
-                            && self.filtered_count() > 0;
-                        let migrate = big_button(
-                            egui::RichText::new("▶  开始迁移")
-                                .size(17.0)
-                                .strong()
-                                .color(ON_ACCENT),
-                            ACCENT,
-                        )
-                        .min_size(egui::vec2(full, 46.0));
-                        if ui.add_enabled(can_migrate, migrate).clicked() {
-                            self.migrate(&ctx);
-                        }
-                        if let Some(summary) = &self.summary {
-                            ui.add_space(4.0);
-                            ui.label(egui::RichText::new(summary.as_str()).color(ACCENT));
-                        }
-                        ui.add_space(12.0);
+                        ui.add_space(14.0);
                     });
             });
 
@@ -735,7 +810,7 @@ impl eframe::App for CamDropApp {
                 );
                 ui.add_space(12.0);
                 ui.selectable_value(&mut self.view, ViewMode::Files, "文件");
-                ui.selectable_value(&mut self.view, ViewMode::Tree, "迁移后目录");
+                ui.selectable_value(&mut self.view, ViewMode::Tree, "目录预览");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if self.scanning {
                         ui.spinner();
