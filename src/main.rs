@@ -10,7 +10,8 @@ fn main() -> eframe::Result<()> {
         .expect("assets/icon.png is a valid PNG");
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1040.0, 700.0])
+            .with_inner_size([1080.0, 720.0])
+            .with_min_inner_size([900.0, 560.0])
             .with_icon(icon),
         ..Default::default()
     };
