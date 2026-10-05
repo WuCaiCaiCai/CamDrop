@@ -201,7 +201,7 @@ pub fn organize(
         if opts.dry_run {
             let dst = dir.join(file_name);
             on_event(Event::Log(format!(
-                "[dry-run] {} -> {}",
+                "[试运行] {} -> {}",
                 file.display(),
                 dst.display()
             )));
@@ -235,7 +235,7 @@ pub fn organize(
             }
             Err(e) => {
                 summary.errors += 1;
-                on_event(Event::Log(format!("FAILED: {} ({e})", file.display())));
+                on_event(Event::Log(format!("失败: {} ({e})", file.display())));
             }
         }
 
