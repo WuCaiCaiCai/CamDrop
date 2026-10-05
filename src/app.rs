@@ -869,6 +869,7 @@ impl eframe::App for CamDropApp {
                                         .corner_radius(egui::CornerRadius::same(8))
                                         .inner_margin(egui::Margin::same(10))
                                         .show(ui, |ui| {
+                                            ui.set_min_width(ui.available_width());
                                             egui::CollapsingHeader::new(
                                                 egui::RichText::new(format!("{year} 年"))
                                                     .size(13.5)
