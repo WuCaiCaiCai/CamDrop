@@ -21,21 +21,21 @@ design system and hard rules.
 ## Releasing
 
 When the user says something like "更新版本并发版" / "release a new version" /
-"bump and publish", with an optional bump kind (patch / minor / major, default patch):
+"bump and publish", with an optional bump kind (patch / minor / major, default patch),
+run the local helper — it bumps the version, commits, tags and pushes; pushing the
+tag triggers GitHub Actions to build and publish:
 
-1. Trigger the release workflow:
-   ```
-   gh workflow run release.yml -f bump=patch     # or minor / major
-   ```
-2. Follow it and wait for completion:
-   ```
-   gh run watch
-   ```
-3. Report the release URL to the user (`gh release view --web` or the printed link).
+```
+pwsh scripts/release.ps1 patch     # or minor / major
+```
 
-The workflow (`.github/workflows/release.yml`) does everything else: it bumps the
-version in `Cargo.toml`/`Cargo.lock`, commits and tags `vX.Y.Z`, builds Windows /
-Linux / macOS binaries, produces `.deb`, `.rpm`, `.AppImage` and `.tar.gz`/`.zip`,
-and publishes a GitHub Release with auto-generated notes.
+It uses the normal git credentials (no GitHub token). Then watch the run and report
+the release URL to the user (the run page is printed by the helper; `gh run watch`
+if `gh` is available).
+
+The workflow (`.github/workflows/release.yml`) builds Windows / Linux / macOS binaries,
+produces `.deb`, `.rpm`, `.AppImage` and `.tar.gz`/`.zip`, and publishes a GitHub Release
+with auto-generated notes. A manual `workflow_dispatch` fallback also exists, but it
+needs GitHub API auth — prefer the tag-push flow.
 
 Full details, prerequisites, and manual fallbacks: [RELEASING.md](RELEASING.md).

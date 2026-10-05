@@ -1,10 +1,15 @@
 name: Release
 
 on:
+  # Primary: push a tag locally (git push origin vX.Y.Z) to build and publish.
+  push:
+    tags:
+      - "v*"
+  # Optional fallback: manual dispatch that bumps the version itself.
   workflow_dispatch:
     inputs:
       bump:
-        description: "Version bump"
+        description: "Version bump (manual dispatch only)"
         type: choice
         options:
           - patch
@@ -19,8 +24,10 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Manual-dispatch only: bump Cargo.toml, commit and tag. Skipped on tag pushes.
   bump:
     name: Bump version and tag
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.release.outputs.tag }}
@@ -61,9 +68,35 @@ jobs:
           git tag "${{ steps.release.outputs.tag }}"
           git push origin "${{ steps.release.outputs.tag }}"
 
+  # Resolves the tag/version whichever way the workflow was triggered.
+  meta:
+    name: Resolve release info
+    needs: [bump]
+    if: ${{ always() && (github.event_name != 'workflow_dispatch' || needs.bump.result == 'success') }}
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.m.outputs.tag }}
+      version: ${{ steps.m.outputs.version }}
+    steps:
+      - id: m
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ needs.bump.outputs.tag }}"
+          else
+            tag="${{ github.ref_name }}"
+          fi
+          if [ -z "$tag" ]; then
+            echo "could not resolve a tag" >&2
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
   build:
     name: Build ${{ matrix.name }}
-    needs: bump
+    needs: [meta]
     strategy:
       fail-fast: false
       matrix:
@@ -88,7 +121,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.bump.outputs.tag }}
+          ref: ${{ needs.meta.outputs.tag }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -118,7 +151,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist/stage | Out-Null
           Copy-Item "${{ matrix.bin }}" dist/stage/
           Copy-Item README.md, LICENSE, assets/icon.png dist/stage/
-          Compress-Archive -Path dist/stage/* -DestinationPath "dist/camdrop-${{ needs.bump.outputs.tag }}-${{ matrix.name }}.zip"
+          Compress-Archive -Path dist/stage/* -DestinationPath "dist/camdrop-${{ needs.meta.outputs.tag }}-${{ matrix.name }}.zip"
 
       - name: Package (macOS / generic Linux tarball)
         if: runner.os != 'Windows'
@@ -128,14 +161,14 @@ jobs:
           mkdir -p dist/stage
           cp "${{ matrix.bin }}" dist/stage/
           cp README.md LICENSE assets/icon.png dist/stage/
-          tar -C dist/stage -czf "dist/camdrop-${{ needs.bump.outputs.tag }}-${{ matrix.name }}.tar.gz" .
+          tar -C dist/stage -czf "dist/camdrop-${{ needs.meta.outputs.tag }}-${{ matrix.name }}.tar.gz" .
 
       - name: Build Linux packages (.deb, .rpm, .AppImage)
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
-          version="${{ needs.bump.outputs.version }}"
+          version="${{ needs.meta.outputs.version }}"
 
           cargo install cargo-deb cargo-generate-rpm --locked
           cargo deb --no-build --output "dist/camdrop_${version}_amd64.deb"
@@ -172,7 +205,7 @@ jobs:
 
   release:
     name: Publish GitHub Release
-    needs: [bump, build]
+    needs: [meta, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -181,8 +214,8 @@ jobs:
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.bump.outputs.tag }}
-          name: ${{ needs.bump.outputs.tag }}
+          tag_name: ${{ needs.meta.outputs.tag }}
+          name: ${{ needs.meta.outputs.tag }}
           generate_release_notes: true
           draft: false
           files: dist/*
