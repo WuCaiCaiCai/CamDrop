@@ -1057,21 +1057,21 @@ impl eframe::App for CamDropApp {
                         if self.step == Step::Migrate {
                             ui.add_space(6.0);
                             ui.label("方式");
-                            let seg_w = ui.available_width();
+                            let spacing = ui.spacing().item_spacing.x;
+                            let bw = ((ui.available_width() - spacing) / 2.0 - 1.0).max(0.0);
                             ui.add_space(2.0);
                             ui.horizontal(|ui| {
-                                let bw = (seg_w - 6.0) / 2.0;
                                 let move_selected = !self.copy_only;
                                 if ui
-                                    .add(
+                                    .add_sized(
+                                        [bw, 34.0],
                                         egui::Button::new(
                                             egui::RichText::new("移动").size(14.0).color(
                                                 if move_selected { ON_ACCENT } else { TEXT },
                                             ),
                                         )
                                         .fill(if move_selected { ACCENT } else { SURFACE_HI })
-                                        .corner_radius(8.0)
-                                        .min_size(egui::vec2(bw, 34.0)),
+                                        .corner_radius(8.0),
                                     )
                                     .clicked()
                                 {
@@ -1079,15 +1079,15 @@ impl eframe::App for CamDropApp {
                                 }
                                 let copy_selected = self.copy_only;
                                 if ui
-                                    .add(
+                                    .add_sized(
+                                        [bw, 34.0],
                                         egui::Button::new(
                                             egui::RichText::new("复制").size(14.0).color(
                                                 if copy_selected { ON_ACCENT } else { TEXT },
                                             ),
                                         )
                                         .fill(if copy_selected { ACCENT } else { SURFACE_HI })
-                                        .corner_radius(8.0)
-                                        .min_size(egui::vec2(bw, 34.0)),
+                                        .corner_radius(8.0),
                                     )
                                     .clicked()
                                 {
