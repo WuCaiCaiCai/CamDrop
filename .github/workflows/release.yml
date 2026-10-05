@@ -1,0 +1,188 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: patch
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  bump:
+    name: Bump version and tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Compute next version
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          current=$(grep -m1 '^version' Cargo.toml | sed -E 's/^version *= *"([^"]+)".*/\1/')
+          IFS=. read -r major minor patch <<< "$current"
+          case "${{ inputs.bump }}" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            *)     patch=$((patch + 1)) ;;
+          esac
+          next="$major.$minor.$patch"
+          echo "current $current -> next $next"
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+          echo "tag=v$next" >> "$GITHUB_OUTPUT"
+      - name: Set version in Cargo.toml
+        run: |
+          cargo install cargo-edit --locked
+          cargo set-version "${{ steps.release.outputs.version }}"
+      - name: Commit, tag and push
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock
+          git commit -m "chore(release): ${{ steps.release.outputs.tag }}"
+          git push origin "HEAD:${{ github.ref_name }}"
+          git tag "${{ steps.release.outputs.tag }}"
+          git push origin "${{ steps.release.outputs.tag }}"
+
+  build:
+    name: Build ${{ matrix.name }}
+    needs: bump
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            name: windows-x86_64
+            bin: target/x86_64-pc-windows-msvc/release/camdrop.exe
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            name: linux-x86_64
+            bin: target/release/camdrop
+          - os: macos-13
+            target: x86_64-apple-darwin
+            name: macos-x86_64
+            bin: target/x86_64-apple-darwin/release/camdrop
+          - os: macos-14
+            target: aarch64-apple-darwin
+            name: macos-aarch64
+            bin: target/aarch64-apple-darwin/release/camdrop
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump.outputs.tag }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libgl1-mesa-dev dpkg-dev
+
+      - name: Build
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            cargo build --release
+          else
+            cargo build --release --target "${{ matrix.target }}"
+          fi
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/stage | Out-Null
+          Copy-Item "${{ matrix.bin }}" dist/stage/
+          Copy-Item README.md, LICENSE, assets/icon.png dist/stage/
+          Compress-Archive -Path dist/stage/* -DestinationPath "dist/camdrop-${{ needs.bump.outputs.tag }}-${{ matrix.name }}.zip"
+
+      - name: Package (macOS / generic Linux tarball)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/stage
+          cp "${{ matrix.bin }}" dist/stage/
+          cp README.md LICENSE assets/icon.png dist/stage/
+          tar -C dist/stage -czf "dist/camdrop-${{ needs.bump.outputs.tag }}-${{ matrix.name }}.tar.gz" .
+
+      - name: Build Linux packages (.deb, .rpm, .AppImage)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ needs.bump.outputs.version }}"
+
+          cargo install cargo-deb cargo-generate-rpm --locked
+          cargo deb --no-build --output "dist/camdrop_${version}_amd64.deb"
+          cargo generate-rpm --output "dist/camdrop-${version}-1.x86_64.rpm"
+
+          appdir="AppDir"
+          rm -rf "$appdir"
+          mkdir -p "$appdir/usr/bin" "$appdir/usr/share/applications" \
+                   "$appdir/usr/share/icons/hicolor/256x256/apps"
+          cp "${{ matrix.bin }}" "$appdir/usr/bin/camdrop"
+          cp assets/camdrop.desktop "$appdir/camdrop.desktop"
+          cp assets/icon.png "$appdir/camdrop.png"
+          cp assets/icon.png "$appdir/.DirIcon"
+          cp assets/camdrop.desktop "$appdir/usr/share/applications/camdrop.desktop"
+          cp assets/icon.png "$appdir/usr/share/icons/hicolor/256x256/apps/camdrop.png"
+          cat > "$appdir/AppRun" <<'EOF'
+          #!/bin/sh
+          exec "$(dirname "$0")/usr/bin/camdrop" "$@"
+          EOF
+          chmod +x "$appdir/AppRun"
+
+          wget -q -O appimagetool \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+          ARCH=x86_64 ./appimagetool --appimage-extract-and-run "$appdir" \
+            "dist/CamDrop-${version}-x86_64.AppImage"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: [bump, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.bump.outputs.tag }}
+          name: ${{ needs.bump.outputs.tag }}
+          generate_release_notes: true
+          draft: false
+          files: dist/*

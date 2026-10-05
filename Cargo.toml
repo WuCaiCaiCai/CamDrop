@@ -2,6 +2,10 @@
 name = "camdrop"
 version = "0.1.0"
 edition = "2024"
+description = "Camera memory card date-based migration tool"
+license = "MIT"
+repository = "https://github.com/WuCaiCaiCai/CamDrop"
+authors = ["WuCaiCaiCai"]
 
 [dependencies]
 chrono = "0.4.45"
@@ -21,4 +25,25 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+[package.metadata.deb]
+maintainer = "WuCaiCaiCai"
+copyright = "2026 WuCaiCaiCai"
+license-file = ["LICENSE"]
+section = "utils"
+priority = "optional"
+depends = "$auto, libgl1, libxkbcommon0, libwayland-client0, libx11-6"
+assets = [
+    ["target/release/camdrop", "usr/bin/", "755"],
+    ["assets/camdrop.desktop", "usr/share/applications/", "644"],
+    ["assets/icon.png", "usr/share/icons/hicolor/256x256/apps/camdrop.png", "644"],
+]
+
+[package.metadata.generate-rpm]
+license = "MIT"
+assets = [
+    { source = "target/release/camdrop", dest = "/usr/bin/camdrop", mode = "755" },
+    { source = "assets/camdrop.desktop", dest = "/usr/share/applications/camdrop.desktop", mode = "644" },
+    { source = "assets/icon.png", dest = "/usr/share/icons/hicolor/256x256/apps/camdrop.png", mode = "644" },
+]
 

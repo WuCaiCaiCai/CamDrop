@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=CamDrop
+Comment=相机存储卡按日期迁移
+Exec=camdrop
+Icon=camdrop
+Terminal=false
+Categories=Graphics;Utility;
+Keywords=camera;photo;raw;sd;card;migrate;
