@@ -23,7 +23,7 @@ pub fn detect_cards() -> Vec<PathBuf> {
 
     for disk in disks.list() {
         let mount = disk.mount_point();
-        if is_system_drive(mount, system.as_deref()) {
+        if !is_candidate_mount(mount, system.as_deref()) {
             continue;
         }
         let root = candidate_root(mount);
@@ -52,16 +52,41 @@ pub fn looks_like_camera(root: &Path) -> bool {
         .any(|e| e.file_type().is_file() && has_extension(e.path(), RAW_SIGNATURES))
 }
 
+/// Returns `true` if `mount` may host a removable camera card.
+///
+/// On Windows every drive except the system drive is considered. On Unix only
+/// the conventional removable-media mount points are used, so the root
+/// filesystem and home directories are never scanned.
 #[cfg(windows)]
-fn is_system_drive(mount: &Path, system: Option<&str>) -> bool {
+fn is_candidate_mount(mount: &Path, system: Option<&str>) -> bool {
     let Some(system) = system else {
-        return false;
+        return true;
     };
-    let mount = mount.to_string_lossy().to_uppercase();
-    mount.starts_with(&system.to_uppercase())
+    !mount
+        .to_string_lossy()
+        .to_uppercase()
+        .starts_with(&system.to_uppercase())
 }
 
 #[cfg(not(windows))]
-fn is_system_drive(_mount: &Path, _system: Option<&str>) -> bool {
-    false
+fn is_candidate_mount(mount: &Path, _system: Option<&str>) -> bool {
+    const EXACT: &[&str] = &["/media", "/mnt", "/run/media", "/Volumes"];
+    const PREFIXES: &[&str] = &["/media/", "/mnt/", "/run/media/", "/Volumes/"];
+    let mount = mount.to_string_lossy();
+    EXACT.contains(&mount.as_ref()) || PREFIXES.iter().any(|prefix| mount.starts_with(prefix))
+}
+
+#[cfg(all(test, not(windows)))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_removable_mounts_only() {
+        assert!(is_candidate_mount(Path::new("/media/user/CARD"), None));
+        assert!(is_candidate_mount(Path::new("/mnt/card"), None));
+        assert!(is_candidate_mount(Path::new("/run/media/user/CARD"), None));
+        assert!(!is_candidate_mount(Path::new("/"), None));
+        assert!(!is_candidate_mount(Path::new("/home/user"), None));
+        assert!(!is_candidate_mount(Path::new("/boot/efi"), None));
+    }
 }
