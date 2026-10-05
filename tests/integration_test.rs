@@ -1,6 +1,7 @@
 use std::fs;
 
-use camdrop::organizer::{self, Options};
+use camdrop::organizer::{self, DateFilter, Options};
+use chrono::NaiveDate;
 use tempfile::tempdir;
 
 #[test]
@@ -61,8 +62,8 @@ fn organize_dry_run_keeps_source() {
     fs::write(src.path().join("a.NEF"), b"raw").unwrap();
 
     let opts = Options {
-        copy_only: false,
         dry_run: true,
+        ..Default::default()
     };
     let summary = organizer::organize(&[src.path().to_path_buf()], dst.path(), &opts, |_| {});
 
@@ -76,10 +77,25 @@ fn preview_lists_files_and_sidecars() {
     fs::write(dir.path().join("a.NEF"), b"raw").unwrap();
     fs::write(dir.path().join("a.NEF.xmp"), b"<xmp/>").unwrap();
 
-    let items = organizer::preview(&[dir.path().to_path_buf()], |_| {});
+    let items = organizer::preview(&[dir.path().to_path_buf()], &Options::default(), |_| {});
 
     assert_eq!(items.len(), 1);
     assert!(items[0].has_xmp);
     assert_eq!(items[0].size, 3);
     assert_ne!(items[0].folder, "unknown");
+}
+
+#[test]
+fn date_filter_matches_requested_granularity() {
+    let day = Some(NaiveDate::from_ymd_opt(2026, 9, 24).unwrap());
+
+    assert!(DateFilter::All.matches(day));
+    assert!(DateFilter::All.matches(None));
+    assert!(DateFilter::Year(2026).matches(day));
+    assert!(!DateFilter::Year(2025).matches(day));
+    assert!(DateFilter::Month(2026, 9).matches(day));
+    assert!(!DateFilter::Month(2026, 10).matches(day));
+    assert!(DateFilter::Day(2026, 9, 24).matches(day));
+    assert!(!DateFilter::Day(2026, 9, 25).matches(day));
+    assert!(!DateFilter::Year(2026).matches(None));
 }

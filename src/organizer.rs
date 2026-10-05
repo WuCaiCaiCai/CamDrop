@@ -1,23 +1,58 @@
-//! Safe file movement and the date-based archival pipeline.
+//! Safe file movement and the date-based migration pipeline.
 
 use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use chrono::{Datelike, NaiveDate};
 use walkdir::WalkDir;
 
 use crate::metadata;
 use crate::xmp;
 use crate::{DEFAULT_EXTENSIONS, has_extension};
 
-/// Archival options.
+/// Selects which files to migrate, by capture date.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DateFilter {
+    /// Every file.
+    #[default]
+    All,
+    /// A single year.
+    Year(i32),
+    /// A single month of a year.
+    Month(i32, u32),
+    /// A single day of a month.
+    Day(i32, u32, u32),
+}
+
+impl DateFilter {
+    /// Returns `true` when `date` falls inside this filter.
+    ///
+    /// Files without a resolvable date only match [`DateFilter::All`].
+    pub fn matches(&self, date: Option<NaiveDate>) -> bool {
+        match self {
+            Self::All => true,
+            Self::Year(year) => date.is_some_and(|d| d.year() == *year),
+            Self::Month(year, month) => {
+                date.is_some_and(|d| d.year() == *year && d.month() == *month)
+            }
+            Self::Day(year, month, day) => {
+                date.is_some_and(|d| d.year() == *year && d.month() == *month && d.day() == *day)
+            }
+        }
+    }
+}
+
+/// Migration options.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Options {
     /// Copy instead of moving the source files.
     pub copy_only: bool,
     /// Print the plan without touching any file.
     pub dry_run: bool,
+    /// Only migrate files matching this capture-date filter.
+    pub filter: DateFilter,
 }
 
 /// Result counters for one archival run.
@@ -57,7 +92,7 @@ fn collect_all(sources: &[PathBuf]) -> Vec<PathBuf> {
     files
 }
 
-/// One row of the archive preview.
+/// One row of the migration preview.
 #[derive(Debug, Clone)]
 pub struct PreviewItem {
     pub source: PathBuf,
@@ -65,10 +100,15 @@ pub struct PreviewItem {
     pub captured: String,
     pub folder: String,
     pub has_xmp: bool,
+    pub date: Option<NaiveDate>,
 }
 
-/// Resolves capture time and target folder for every file, without moving anything.
-pub fn preview(sources: &[PathBuf], mut on_event: impl FnMut(Event)) -> Vec<PreviewItem> {
+/// Resolves capture time and target folder for every matching file.
+pub fn preview(
+    sources: &[PathBuf],
+    opts: &Options,
+    mut on_event: impl FnMut(Event),
+) -> Vec<PreviewItem> {
     let files = collect_all(sources);
     let total = files.len();
     on_event(Event::Progress(0, total));
@@ -76,21 +116,26 @@ pub fn preview(sources: &[PathBuf], mut on_event: impl FnMut(Event)) -> Vec<Prev
     let mut items = Vec::with_capacity(total);
     for (index, file) in files.iter().enumerate() {
         let dt = metadata::capture_time(file);
-        let captured = dt
-            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
-            .unwrap_or_else(|| "未知".to_owned());
-        let folder = dt
-            .map(|dt| metadata::date_dir(&dt).to_string_lossy().replace('\\', "/"))
-            .unwrap_or_else(|| "unknown".to_owned());
-        let size = fs::metadata(file).map(|m| m.len()).unwrap_or(0);
+        let date = dt.map(|dt| dt.date_naive());
 
-        items.push(PreviewItem {
-            source: file.clone(),
-            size,
-            captured,
-            folder,
-            has_xmp: xmp::sidecar_of(file).is_file(),
-        });
+        if opts.filter.matches(date) {
+            let captured = dt
+                .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                .unwrap_or_else(|| "未知".to_owned());
+            let folder = dt
+                .map(|dt| metadata::date_dir(&dt).to_string_lossy().replace('\\', "/"))
+                .unwrap_or_else(|| "unknown".to_owned());
+            let size = fs::metadata(file).map(|m| m.len()).unwrap_or(0);
+
+            items.push(PreviewItem {
+                source: file.clone(),
+                size,
+                captured,
+                folder,
+                has_xmp: xmp::sidecar_of(file).is_file(),
+                date,
+            });
+        }
         on_event(Event::Progress(index + 1, total));
     }
     items
@@ -175,7 +220,7 @@ fn is_exdev(code: i32) -> bool {
     code == 18
 }
 
-/// Archives every supported file from `sources` into `target/<year>/<MM_dd>/`.
+/// Migrates every matching supported file from `sources` into `target/<year>/<MM_dd>/`.
 ///
 /// Sidecar `.xmp` files follow their photo; leftover sidecars are reconciled
 /// against already-migrated photos at the end.
@@ -185,7 +230,13 @@ pub fn organize(
     opts: &Options,
     mut on_event: impl FnMut(Event),
 ) -> Summary {
-    let files = collect_all(sources);
+    let files: Vec<PathBuf> = collect_all(sources)
+        .into_iter()
+        .filter(|file| {
+            let date = metadata::capture_time(file).map(|dt| dt.date_naive());
+            opts.filter.matches(date)
+        })
+        .collect();
     let total = files.len();
     on_event(Event::Progress(0, total));
 
@@ -201,7 +252,7 @@ pub fn organize(
         if opts.dry_run {
             let dst = dir.join(file_name);
             on_event(Event::Log(format!(
-                "[试运行] {} -> {}",
+                "[计划] {} -> {}",
                 file.display(),
                 dst.display()
             )));
