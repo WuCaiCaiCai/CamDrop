@@ -34,6 +34,8 @@ pub struct CamDropApp {
 
 impl CamDropApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        install_cjk_font(&cc.egui_ctx);
+
         let (tx, rx) = mpsc::channel();
         let target = std::env::current_dir()
             .unwrap_or_default()
@@ -125,6 +127,50 @@ impl CamDropApp {
                 }
             }
         }
+    }
+}
+
+fn install_cjk_font(ctx: &egui::Context) {
+    const CANDIDATES: &[&str] = &[
+        "C:/Windows/Fonts/msyh.ttc",
+        "C:/Windows/Fonts/msyh.ttf",
+        "C:/Windows/Fonts/simhei.ttf",
+        "C:/Windows/Fonts/simsun.ttc",
+        "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/STHeiti Light.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+        "/usr/share/fonts/wenquanyi/wqy-microhei/wqy-microhei.ttc",
+        "/usr/share/fonts/wenquanyi/wqy-zenhei/wqy-zenhei.ttc",
+    ];
+
+    for path in CANDIDATES {
+        let Ok(bytes) = std::fs::read(path) else {
+            continue;
+        };
+
+        let mut fonts = egui::FontDefinitions::default();
+        fonts.font_data.insert(
+            "cjk".to_owned(),
+            std::sync::Arc::new(egui::FontData::from_owned(bytes)),
+        );
+        fonts
+            .families
+            .entry(egui::FontFamily::Proportional)
+            .or_default()
+            .push("cjk".to_owned());
+        fonts
+            .families
+            .entry(egui::FontFamily::Monospace)
+            .or_default()
+            .push("cjk".to_owned());
+        ctx.set_fonts(fonts);
+        return;
     }
 }
 
