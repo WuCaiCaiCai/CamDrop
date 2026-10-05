@@ -1,30 +1,66 @@
 # CamDrop
 
-把相机存储卡里的照片和视频按拍摄日期归好档。
+> 相机存储卡归档工具：自动找到存储卡，按拍摄日期整理照片和视频，并同步 Darktable / Lightroom 生成的 `.xmp` 侧边栏文件。
 
-插上卡，程序自己找到卡，读每张照片的拍摄时间，分到 `年份/月_日` 目录里，再移动到指定位置。调色软件（Darktable、Lightroom）生成的 `.xmp` 侧边栏文件会跟着照片一起走。用 Rust 写，编译出来是一个可执行文件，不需要 Python，也不需要额外装运行时。
+🌐 [English](README_EN.md) | 简体中文
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-## 功能
+## 📖 简介
 
-- 自动识别存储卡。扫描已挂载的磁盘，靠 RAW 文件（`.nef` `.cr3` `.arw` `.dng` `.raf` 等）判断哪块是相机卡。Windows 跳过系统盘；Linux 只在 `/media`、`/mnt`、`/run/media` 下找；macOS 在 `/Volumes` 下找。
-- 按拍摄日期归档。优先读 EXIF 的 `DateTimeOriginal`，读不到就退回文件修改时间，目录形如 `2026/09_24`。
-- 同步 `.xmp`。照片移动时把同名的 `.xmp` 一起搬过去；搬完之后如果卡上还有没跟上的 xmp，会再扫一遍，按文件名匹配补迁。
-- 跨盘移动。从 F: 移到 E: 时 `rename` 会报 CrossesDevices，程序自动改成「复制 + 删除」。
-- 只读文件处理。相机写的文件可能带只读属性，删除失败时先去掉只读再重试。
-- 重名不覆盖。目标目录已有同名文件时自动加 `_1`、`_2`。
-- 试运行。只看归档计划，不动任何文件。
+CamDrop 是一个用 Rust 写的桌面小工具。插上相机存储卡后，它会扫描已挂载的磁盘，靠 RAW 文件判断哪块是相机卡，再把卡里的照片、视频按拍摄时间分到 `年份/月_日` 目录，移动到目标位置。移动过程中，和照片同名的 `.xmp` 文件会一起搬走。
 
-## 环境要求
+界面基于 eframe / egui，编译后是一个可执行文件，不需要 Python 或任何额外运行时。
 
-运行支持 Windows、Linux 和 macOS。界面渲染走 OpenGL。
+## ✨ 功能特性
 
-从源码编译需要 Rust 1.94 或更新的 stable 工具链。
+### 🎯 核心功能
 
-界面文字是中文，需要系统里有中文字体。程序在启动时从系统字体目录里找一个来用（Windows 用微软雅黑，Linux 用 Noto CJK 或文泉驿，macOS 用苹方），字体不打包进程序。
+| 功能 | 说明 |
+|------|------|
+| 存储卡自动识别 | 扫描已挂载磁盘，依据 `.nef` `.cr3` `.arw` `.dng` 等 RAW 文件判断相机卡；Windows 跳过系统盘，Linux 只在 `/media`、`/mnt`、`/run/media` 下查找，macOS 在 `/Volumes` 下查找 |
+| 按拍摄日期归档 | 读取 EXIF 的 `DateTimeOriginal` 建立目录；读不到时退回文件修改时间 |
+| XMP 同步 | 照片移动时把同名的 `.xmp` 一并搬走；搬完后若卡上仍有遗漏的 xmp，会再次扫描并按文件名匹配补迁 |
+| 跨盘安全移动 | `rename` 遇到 CrossesDevices 时自动降级为「复制 + 删除」 |
+| 只读文件处理 | 删除失败时先去掉只读属性再重试 |
+| 重名保护 | 目标已有同名文件时自动追加 `_1`、`_2`，不覆盖 |
 
-## 编译
+### 🖥️ 界面与操作
+
+| 特性 | 说明 |
+|------|------|
+| 源卡勾选 | 识别到的存储卡以列表展示，可多选；未识别到时手动「添加文件夹」 |
+| 目标目录 | 默认是程序所在目录下的 `RAW`，可用「浏览」修改 |
+| 仅复制 | 保留源卡文件，只向目标目录复制一份 |
+| 试运行 | 只打印归档计划，不修改任何文件 |
+| 进度与日志 | 后台线程执行，界面显示进度条，逐条记录每个文件的处理结果，失败项单独标出 |
+
+### 🧩 支持格式
+
+| 类型 | 扩展名 |
+|------|--------|
+| 照片 | `.jpg` `.jpeg` `.nef` `.cr3` `.arw` `.dng` |
+| 视频 | `.mp4` `.mov` |
+| 探测用 RAW 签名 | 归档格式之外，还包括 `.raf` `.orf` `.rw2` `.pef` `.srw` `.nrw` |
+
+## 🚀 快速开始
+
+### 环境要求
+
+| 项目 | 要求 |
+|------|------|
+| 操作系统 | Windows / Linux / macOS |
+| 图形接口 | OpenGL（由显卡驱动提供） |
+| 中文字体 | 系统需装有中文字体：Windows 微软雅黑、Linux Noto CJK 或文泉驿、macOS 苹方（程序读取系统字体，不打包） |
+| 编译工具链 | Rust 1.94 或更新的 stable |
+
+### 方式一：下载预编译版本（推荐）
+
+1. 前往 [Releases](../../releases) 页面
+2. 下载对应系统的可执行文件
+3. 双击运行
+
+### 方式二：源码编译
 
 ```bash
 git clone https://github.com/WuCaiCaiCai/CamDrop.git
@@ -32,27 +68,28 @@ cd CamDrop
 cargo build --release
 ```
 
-产物在 `target/release/` 下，Linux/macOS 是 `camdrop`，Windows 是 `camdrop.exe`。
+产物位于 `target/release/`：Linux / macOS 为 `camdrop`，Windows 为 `camdrop.exe`。
 
-也可以直接到 [Releases](../../releases) 页面下载预编译的版本。
+## 📖 使用指南
 
-## 使用
+### 操作步骤
 
-运行程序后：
+| 步骤 | 操作 |
+|------|------|
+| 1 | 运行程序，等待扫描完成，界面列出识别到的相机卡 |
+| 2 | 勾选需要归档的卡；没有识别到时点「添加文件夹」手动选择 |
+| 3 | 确认目标目录（默认为程序目录下的 `RAW`） |
+| 4 | 按需勾选「仅复制」或「试运行」 |
+| 5 | 点击「开始归档」，在下方日志区查看结果 |
 
-1. 程序扫描挂载的磁盘，把识别到的相机卡列出来。
-2. 勾选要归档的卡；如果没识别到，点「添加文件夹」手动选。
-3. 选目标目录，默认是程序所在目录下的 `RAW`。
-4. 点「开始归档」。
+### 选项说明
 
-界面上的两个开关：
+| 选项 | 默认 | 说明 |
+|------|------|------|
+| 仅复制 | 关闭 | 保留源卡文件，只复制到目标目录 |
+| 试运行 | 关闭 | 只输出计划，不移动、不复制 |
 
-- 仅复制：保留源卡里的文件，只往目标目录复制一份。
-- 试运行：只打印每个文件会去哪，不移动、不复制。
-
-移动过程在后台进行，界面下方的日志区会逐条显示结果，出错的文件会标出来。
-
-## 归档结构
+## 📁 归档结构
 
 ```text
 RAW/
@@ -65,13 +102,13 @@ RAW/
         └── DSC_2048.NEF
 ```
 
-## 项目结构
+## 🗂️ 项目结构
 
 ```text
 src/
-├── main.rs        程序入口
+├── main.rs        程序入口、窗口初始化
 ├── app.rs         界面状态、后台归档线程、日志
-├── lib.rs         对外导出模块和默认扩展名
+├── lib.rs         模块导出与默认扩展名
 ├── detector.rs    挂载点枚举、RAW 特征探测
 ├── metadata.rs    EXIF 拍摄时间、mtime 回退、目录名
 ├── organizer.rs   文件收集、去重命名、跨盘移动、xmp 补迁
@@ -80,16 +117,32 @@ tests/
 └── integration_test.rs
 ```
 
-## 开发
+## ⚠️ 注意事项
+
+- 归档是移动操作，默认会删除源卡文件。首次使用建议先勾选「试运行」确认计划。
+- 自动探测依赖挂载点约定。存储卡挂在非常规位置时可能识别不到，此时用「添加文件夹」手动指定。
+- Windows 上除系统盘外的所有盘只要存在 RAW 文件都会被列为候选，包括你已经拷贝过照片的数据盘。
+- 界面为中文，缺少系统中文字体时文字会显示为方框。
+
+## 🛠️ 开发指南
 
 ```bash
 cargo fmt
 cargo clippy --all-targets -- -D warnings
 cargo test
+cargo build --release
 ```
 
-release 配置开了体积优化（`opt-level = z`、LTO、strip），Windows 下可执行文件约 5.6 MB。
+release 配置启用了体积优化（`opt-level = "z"`、LTO、`strip`），Windows 下可执行文件约 5.7 MB。
 
-## 许可
+## 🙏 致谢
+
+- [eframe / egui](https://github.com/emilk/egui) — 窗口界面
+- [nom-exif](https://github.com/mindeng/nom-exif) — EXIF 解析
+- [sysinfo](https://github.com/GuillaumeGomez/sysinfo) — 挂载点枚举
+- [walkdir](https://github.com/BurntSushi/walkdir) — 目录遍历
+- [rfd](https://github.com/PolyMeilex/rfd) — 系统文件选择对话框
+
+## 📄 License
 
 [MIT](LICENSE)
