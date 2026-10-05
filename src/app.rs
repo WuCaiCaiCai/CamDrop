@@ -421,9 +421,9 @@ fn apply_style(ctx: &egui::Context) {
     visuals.widgets.hovered.weak_bg_fill = egui::Color32::from_rgb(214, 226, 236);
     visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, ACCENT.gamma_multiply(0.65));
     visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, TEXT);
-    visuals.widgets.active.weak_bg_fill = ACCENT;
+    visuals.widgets.active.weak_bg_fill = SURFACE_HI;
     visuals.widgets.active.bg_fill = ACCENT;
-    visuals.widgets.active.fg_stroke = egui::Stroke::new(1.0, ON_ACCENT);
+    visuals.widgets.active.fg_stroke = egui::Stroke::new(1.0, TEXT);
     visuals.widgets.open.fg_stroke = egui::Stroke::new(1.0, TEXT);
 
     style.visuals = visuals;
@@ -547,18 +547,6 @@ fn toggle_button(ui: &mut egui::Ui, label: &str, selected: bool, height: f32) ->
     action_button(ui, label, fill, text, height, true)
 }
 
-/// A small chip that highlights when selected.
-fn chip_button(ui: &mut egui::Ui, text: &str, selected: bool) -> egui::Response {
-    let fill = if selected { ACCENT } else { SURFACE_HI };
-    let color = if selected { ON_ACCENT } else { TEXT };
-    ui.add(
-        egui::Button::new(egui::RichText::new(text).size(13.0).color(color))
-            .fill(fill)
-            .corner_radius(6.0)
-            .small(),
-    )
-}
-
 /// A day cell: smallest level, white outline when idle, accent when selected.
 fn day_chip(ui: &mut egui::Ui, text: &str, selected: bool) -> egui::Response {
     let (fill, color, stroke) = if selected {
@@ -576,20 +564,10 @@ fn day_chip(ui: &mut egui::Ui, text: &str, selected: bool) -> egui::Response {
     )
 }
 
-/// A month chip: mid level, tinted to read above the day cells.
-fn month_chip(ui: &mut egui::Ui, text: &str, selected: bool) -> egui::Response {
-    let (fill, color) = if selected {
-        (ACCENT, ON_ACCENT)
-    } else {
-        (egui::Color32::from_rgb(219, 238, 246), ACCENT_DARK)
-    };
-    ui.add(
-        egui::Button::new(egui::RichText::new(text).size(12.5).strong().color(color))
-            .fill(fill)
-            .corner_radius(6.0)
-            .min_size(egui::vec2(50.0, 24.0))
-            .small(),
-    )
+/// A dark, bold heading. Always legible on light surfaces (never inherits the
+/// white selected-widget text color).
+fn heading(ui: &mut egui::Ui, text: &str) {
+    ui.label(egui::RichText::new(text).strong().color(TEXT));
 }
 
 fn file_name(item: &PreviewItem) -> String {
@@ -662,7 +640,7 @@ impl eframe::App for CamDropApp {
                     if left.is_empty() {
                         ui.label(egui::RichText::new("就绪").color(TEXT_WEAK));
                     } else {
-                        ui.label(egui::RichText::new(left).strong());
+                        ui.label(egui::RichText::new(left).strong().color(TEXT));
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let toggle = if self.log_open {
@@ -712,7 +690,7 @@ impl eframe::App for CamDropApp {
                 .resizable(true)
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("日志").strong());
+                        ui.label(egui::RichText::new("日志").strong().color(TEXT));
                         if !self.log.is_empty() && ui.small_button("清空").clicked() {
                             self.log.clear();
                         }
@@ -739,17 +717,17 @@ impl eframe::App for CamDropApp {
             )
             .default_size(340.0)
             .min_size(300.0)
+            .max_size(440.0)
             .resizable(true)
             .show(ui, |ui| {
-                egui::Panel::bottom("migrate_bar").show(ui, |ui| {
-                    ui.add_space(6.0);
-                    ui.separator();
-                    ui.add_space(6.0);
-                    if action_button(ui, "开始迁移", ACCENT, ON_ACCENT, 46.0, !self.busy).clicked()
-                    {
-                        self.try_migrate(&ctx);
-                    }
-                });
+                // Primary action: always visible at the top of the workflow panel.
+                if action_button(ui, "开始迁移", ACCENT, ON_ACCENT, 46.0, !self.busy).clicked()
+                {
+                    self.try_migrate(&ctx);
+                }
+                ui.add_space(6.0);
+                ui.separator();
+                ui.add_space(6.0);
 
                 egui::ScrollArea::vertical()
                     .id_salt("controls_scroll")
@@ -873,131 +851,140 @@ impl eframe::App for CamDropApp {
                                 let toggles: RefCell<Vec<(Vec<NaiveDate>, bool)>> =
                                     RefCell::new(Vec::new());
 
-                                egui::Frame::new()
-                                    .fill(SURFACE)
-                                    .stroke(egui::Stroke::new(1.0, BORDER))
-                                    .corner_radius(egui::CornerRadius::same(8))
-                                    .inner_margin(egui::Margin::same(8))
-                                    .show(ui, |ui| {
-                                        let mut first_year = true;
-                                        for (year, months) in &tree {
-                                            let year_days: Vec<NaiveDate> = months
-                                                .iter()
-                                                .flat_map(|(m, days)| {
-                                                    days.iter().map(move |d| {
-                                                        NaiveDate::from_ymd_opt(*year, *m, *d)
-                                                            .unwrap()
-                                                    })
-                                                })
-                                                .collect();
-                                            let year_all =
-                                                year_days.iter().all(|d| selected.contains(d));
+                                for (year, months) in &tree {
+                                    let year_days: Vec<NaiveDate> = months
+                                        .iter()
+                                        .flat_map(|(m, days)| {
+                                            days.iter().map(move |d| {
+                                                NaiveDate::from_ymd_opt(*year, *m, *d).unwrap()
+                                            })
+                                        })
+                                        .collect();
+                                    let year_all = year_days.iter().all(|d| selected.contains(d));
 
-                                            if !first_year {
-                                                ui.add_space(8.0);
-                                            }
-                                            first_year = false;
-
-                                            // Year band: the top level.
-                                            egui::Frame::new()
-                                                .fill(SURFACE_ALT)
-                                                .corner_radius(egui::CornerRadius::same(6))
-                                                .inner_margin(egui::Margin::symmetric(8, 4))
-                                                .show(ui, |ui| {
-                                                    ui.horizontal(|ui| {
-                                                        let (bar, _) = ui.allocate_exact_size(
-                                                            egui::vec2(3.0, 16.0),
-                                                            egui::Sense::hover(),
-                                                        );
-                                                        ui.painter().rect_filled(
-                                                            bar,
-                                                            egui::CornerRadius::same(2),
-                                                            ACCENT,
-                                                        );
-                                                        ui.add_space(6.0);
-                                                        ui.label(
-                                                            egui::RichText::new(format!(
-                                                                "{year} 年"
-                                                            ))
-                                                            .size(14.0)
-                                                            .strong(),
-                                                        );
-                                                        ui.with_layout(
-                                                            egui::Layout::right_to_left(
-                                                                egui::Align::Center,
-                                                            ),
-                                                            |ui| {
-                                                                if ui
-                                                                    .add(
-                                                                        egui::Button::new(
-                                                                            egui::RichText::new(
-                                                                                if year_all {
-                                                                                    "全不选"
-                                                                                } else {
-                                                                                    "全选"
-                                                                                },
-                                                                            )
-                                                                            .size(12.0)
-                                                                            .color(ACCENT_DARK),
-                                                                        )
-                                                                        .frame(false),
-                                                                    )
-                                                                    .clicked()
-                                                                {
-                                                                    toggles.borrow_mut().push((
-                                                                        year_days.clone(),
-                                                                        year_all,
-                                                                    ));
-                                                                }
-                                                            },
-                                                        );
-                                                    });
-                                                });
-
-                                            // Month row: mid level, indented.
-                                            for (month, days) in months {
-                                                let month_days: Vec<NaiveDate> = days
-                                                    .iter()
-                                                    .map(|d| {
-                                                        NaiveDate::from_ymd_opt(*year, *month, *d)
-                                                            .unwrap()
-                                                    })
-                                                    .collect();
-                                                let month_all =
-                                                    month_days.iter().all(|d| selected.contains(d));
-                                                ui.add_space(6.0);
-                                                ui.horizontal_wrapped(|ui| {
-                                                    ui.add_space(8.0);
-                                                    if month_chip(
-                                                        ui,
-                                                        &format!("{month} 月"),
-                                                        month_all,
-                                                    )
-                                                    .clicked()
+                                    // Each year is its own collapsible box.
+                                    egui::Frame::new()
+                                        .fill(SURFACE)
+                                        .stroke(egui::Stroke::new(1.0, BORDER))
+                                        .corner_radius(egui::CornerRadius::same(8))
+                                        .inner_margin(egui::Margin::same(10))
+                                        .show(ui, |ui| {
+                                            egui::CollapsingHeader::new(
+                                                egui::RichText::new(format!("{year} 年"))
+                                                    .size(13.5)
+                                                    .strong()
+                                                    .color(TEXT),
+                                            )
+                                            .id_salt(("year", *year))
+                                            .default_open(true)
+                                            .show(
+                                                ui,
+                                                |ui| {
+                                                    if ui
+                                                        .add(
+                                                            egui::Button::new(
+                                                                egui::RichText::new(if year_all {
+                                                                    "全不选"
+                                                                } else {
+                                                                    "全选"
+                                                                })
+                                                                .size(11.5)
+                                                                .color(ACCENT_DARK),
+                                                            )
+                                                            .frame(false),
+                                                        )
+                                                        .clicked()
                                                     {
                                                         toggles
                                                             .borrow_mut()
-                                                            .push((month_days.clone(), month_all));
+                                                            .push((year_days.clone(), year_all));
                                                     }
-                                                    ui.add_space(6.0);
-                                                    for day in days {
-                                                        let date = NaiveDate::from_ymd_opt(
-                                                            *year, *month, *day,
-                                                        )
-                                                        .unwrap();
-                                                        let sel = selected.contains(&date);
-                                                        if day_chip(ui, &format!("{day}"), sel)
-                                                            .clicked()
-                                                        {
-                                                            toggles
-                                                                .borrow_mut()
-                                                                .push((vec![date], sel));
-                                                        }
+
+                                                    for (month, days) in months {
+                                                        let month_days: Vec<NaiveDate> = days
+                                                            .iter()
+                                                            .map(|d| {
+                                                                NaiveDate::from_ymd_opt(
+                                                                    *year, *month, *d,
+                                                                )
+                                                                .unwrap()
+                                                            })
+                                                            .collect();
+                                                        let month_all = month_days
+                                                            .iter()
+                                                            .all(|d| selected.contains(d));
+
+                                                        ui.add_space(8.0);
+                                                        ui.horizontal(|ui| {
+                                                            let (dot, _) = ui.allocate_exact_size(
+                                                                egui::vec2(7.0, 7.0),
+                                                                egui::Sense::hover(),
+                                                            );
+                                                            ui.painter().rect_filled(
+                                                                dot,
+                                                                egui::CornerRadius::same(3),
+                                                                ACCENT,
+                                                            );
+                                                            ui.add_space(6.0);
+                                                            ui.label(
+                                                                egui::RichText::new(format!(
+                                                                    "{month} 月"
+                                                                ))
+                                                                .size(13.0)
+                                                                .strong()
+                                                                .color(ACCENT_DARK),
+                                                            );
+                                                            ui.add_space(12.0);
+                                                            if ui
+                                                                .add(
+                                                                    egui::Button::new(
+                                                                        egui::RichText::new(
+                                                                            if month_all {
+                                                                                "清除"
+                                                                            } else {
+                                                                                "全月"
+                                                                            },
+                                                                        )
+                                                                        .size(11.5)
+                                                                        .color(TEXT_WEAK),
+                                                                    )
+                                                                    .frame(false),
+                                                                )
+                                                                .clicked()
+                                                            {
+                                                                toggles.borrow_mut().push((
+                                                                    month_days.clone(),
+                                                                    month_all,
+                                                                ));
+                                                            }
+                                                        });
+                                                        ui.add_space(4.0);
+                                                        ui.horizontal_wrapped(|ui| {
+                                                            for day in days {
+                                                                let date = NaiveDate::from_ymd_opt(
+                                                                    *year, *month, *day,
+                                                                )
+                                                                .unwrap();
+                                                                let sel = selected.contains(&date);
+                                                                if day_chip(
+                                                                    ui,
+                                                                    &format!("{day}"),
+                                                                    sel,
+                                                                )
+                                                                .clicked()
+                                                                {
+                                                                    toggles
+                                                                        .borrow_mut()
+                                                                        .push((vec![date], sel));
+                                                                }
+                                                            }
+                                                        });
                                                     }
-                                                });
-                                            }
-                                        }
-                                    });
+                                                },
+                                            );
+                                        });
+                                    ui.add_space(8.0);
+                                }
 
                                 for (days, was_all) in toggles.into_inner() {
                                     if was_all {
@@ -1061,23 +1048,53 @@ impl eframe::App for CamDropApp {
                         if self.step == Step::Migrate {
                             ui.add_space(6.0);
                             ui.label("方式");
+                            let seg_w = ui.available_width();
+                            ui.add_space(2.0);
                             ui.horizontal(|ui| {
-                                if chip_button(ui, "移动", !self.copy_only).clicked() {
+                                let bw = (seg_w - 6.0) / 2.0;
+                                let move_selected = !self.copy_only;
+                                if ui
+                                    .add(
+                                        egui::Button::new(
+                                            egui::RichText::new("移动").size(14.0).color(
+                                                if move_selected { ON_ACCENT } else { TEXT },
+                                            ),
+                                        )
+                                        .fill(if move_selected { ACCENT } else { SURFACE_HI })
+                                        .corner_radius(8.0)
+                                        .min_size(egui::vec2(bw, 34.0)),
+                                    )
+                                    .clicked()
+                                {
                                     self.copy_only = false;
                                 }
-                                if chip_button(ui, "复制", self.copy_only).clicked() {
+                                let copy_selected = self.copy_only;
+                                if ui
+                                    .add(
+                                        egui::Button::new(
+                                            egui::RichText::new("复制").size(14.0).color(
+                                                if copy_selected { ON_ACCENT } else { TEXT },
+                                            ),
+                                        )
+                                        .fill(if copy_selected { ACCENT } else { SURFACE_HI })
+                                        .corner_radius(8.0)
+                                        .min_size(egui::vec2(bw, 34.0)),
+                                    )
+                                    .clicked()
+                                {
                                     self.copy_only = true;
                                 }
-                                ui.add_space(6.0);
-                                ui.label(
-                                    egui::RichText::new(if self.copy_only {
-                                        "保留源文件"
-                                    } else {
-                                        "删除源文件"
-                                    })
-                                    .color(TEXT_WEAK),
-                                );
                             });
+                            ui.add_space(3.0);
+                            ui.label(
+                                egui::RichText::new(if self.copy_only {
+                                    "复制：迁移后在目标目录留一份，源卡文件保留。"
+                                } else {
+                                    "移动：迁移后删除源卡上的原文件。"
+                                })
+                                .size(11.5)
+                                .color(TEXT_WEAK),
+                            );
                             ui.add_space(8.0);
                             ui.label("目标目录");
                             if action_button(
@@ -1124,7 +1141,7 @@ impl eframe::App for CamDropApp {
                     .sum();
 
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("预览").size(16.0).strong());
+                    ui.label(egui::RichText::new("预览").size(16.0).strong().color(TEXT));
                     ui.add_space(10.0);
                     ui.selectable_value(&mut self.view, ViewMode::Files, "文件");
                     ui.selectable_value(&mut self.view, ViewMode::Tree, "目录预览");
@@ -1190,19 +1207,19 @@ impl eframe::App for CamDropApp {
                             .column(Column::initial(52.0).at_least(44.0))
                             .header(26.0, |mut header| {
                                 header.col(|ui| {
-                                    ui.strong("文件名");
+                                    heading(ui, "文件名");
                                 });
                                 header.col(|ui| {
-                                    ui.strong("大小");
+                                    heading(ui, "大小");
                                 });
                                 header.col(|ui| {
-                                    ui.strong("拍摄时间");
+                                    heading(ui, "拍摄时间");
                                 });
                                 header.col(|ui| {
-                                    ui.strong("迁移到");
+                                    heading(ui, "迁移到");
                                 });
                                 header.col(|ui| {
-                                    ui.strong("XMP");
+                                    heading(ui, "XMP");
                                 });
                             })
                             .body(|body| {
@@ -1244,7 +1261,8 @@ impl eframe::App for CamDropApp {
                                         items.len(),
                                         human_size(folder_size)
                                     ))
-                                    .strong();
+                                    .strong()
+                                    .color(TEXT);
                                     egui::CollapsingHeader::new(header).default_open(true).show(
                                         ui,
                                         |ui| {
@@ -1270,7 +1288,12 @@ impl eframe::App for CamDropApp {
             let mut close = false;
             let response = egui::Modal::new(egui::Id::new("validation")).show(&ctx, |ui| {
                 ui.set_max_width(440.0);
-                ui.label(egui::RichText::new("还不能开始迁移").size(16.0).strong());
+                ui.label(
+                    egui::RichText::new("还不能开始迁移")
+                        .size(16.0)
+                        .strong()
+                        .color(TEXT),
+                );
                 ui.add_space(8.0);
                 for problem in &problems {
                     ui.label(format!("• {problem}"));
