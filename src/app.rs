@@ -570,6 +570,16 @@ fn heading(ui: &mut egui::Ui, text: &str) {
     ui.label(egui::RichText::new(text).strong().color(TEXT));
 }
 
+/// A small framed button that reads as a button (not plain text).
+fn mini_button(ui: &mut egui::Ui, text: &str, color: egui::Color32) -> egui::Response {
+    ui.add(
+        egui::Button::new(egui::RichText::new(text).size(11.5).color(color))
+            .fill(SURFACE_HI)
+            .corner_radius(6.0)
+            .small(),
+    )
+}
+
 fn file_name(item: &PreviewItem) -> String {
     item.source
         .file_name()
@@ -867,138 +877,120 @@ impl eframe::App for CamDropApp {
                                         .fill(SURFACE)
                                         .stroke(egui::Stroke::new(1.0, BORDER))
                                         .corner_radius(egui::CornerRadius::same(8))
-                                        .inner_margin(egui::Margin::same(10))
+                                        .inner_margin(egui::Margin::same(8))
                                         .show(ui, |ui| {
                                             ui.set_min_width(ui.available_width());
-                                            egui::CollapsingHeader::new(
-                                                egui::RichText::new(format!("{year} 年"))
-                                                    .size(13.5)
-                                                    .strong()
-                                                    .color(TEXT),
+                                            let year_id = egui::Id::new(("year", *year));
+                                            egui::collapsing_header::CollapsingState::load_with_default_open(
+                                                ui.ctx(),
+                                                year_id,
+                                                true,
                                             )
-                                            .id_salt(("year", *year))
-                                            .default_open(true)
-                                            .show(
-                                                ui,
-                                                |ui| {
-                                                    ui.with_layout(
-                                                        egui::Layout::right_to_left(
-                                                            egui::Align::Center,
-                                                        ),
-                                                        |ui| {
-                                                            if ui
-                                                                .add(
-                                                                    egui::Button::new(
-                                                                        egui::RichText::new(
-                                                                            if year_all {
-                                                                                "全不选"
-                                                                            } else {
-                                                                                "全选"
-                                                                            },
-                                                                        )
-                                                                        .size(11.5)
-                                                                        .color(ACCENT_DARK),
-                                                                    )
-                                                                    .frame(false),
-                                                                )
-                                                                .clicked()
-                                                            {
-                                                                toggles.borrow_mut().push((
-                                                                    year_days.clone(),
-                                                                    year_all,
-                                                                ));
-                                                            }
-                                                        },
-                                                    );
+                                            .show_header(ui, |ui| {
+                                                ui.label(
+                                                    egui::RichText::new(format!("{year} 年"))
+                                                        .size(13.5)
+                                                        .strong()
+                                                        .color(TEXT),
+                                                );
+                                                ui.with_layout(
+                                                    egui::Layout::right_to_left(
+                                                        egui::Align::Center,
+                                                    ),
+                                                    |ui| {
+                                                        if mini_button(
+                                                            ui,
+                                                            if year_all { "全不选" } else { "全选" },
+                                                            ACCENT_DARK,
+                                                        )
+                                                        .clicked()
+                                                        {
+                                                            toggles.borrow_mut().push((
+                                                                year_days.clone(),
+                                                                year_all,
+                                                            ));
+                                                        }
+                                                    },
+                                                );
+                                            })
+                                            .body(|ui| {
+                                                for (month, days) in months {
+                                                    let month_days: Vec<NaiveDate> = days
+                                                        .iter()
+                                                        .map(|d| {
+                                                            NaiveDate::from_ymd_opt(
+                                                                *year, *month, *d,
+                                                            )
+                                                            .unwrap()
+                                                        })
+                                                        .collect();
+                                                    let month_all = month_days
+                                                        .iter()
+                                                        .all(|d| selected.contains(d));
 
-                                                    for (month, days) in months {
-                                                        let month_days: Vec<NaiveDate> = days
-                                                            .iter()
-                                                            .map(|d| {
-                                                                NaiveDate::from_ymd_opt(
-                                                                    *year, *month, *d,
-                                                                )
-                                                                .unwrap()
-                                                            })
-                                                            .collect();
-                                                        let month_all = month_days
-                                                            .iter()
-                                                            .all(|d| selected.contains(d));
-
-                                                        ui.add_space(8.0);
-                                                        ui.horizontal(|ui| {
-                                                            let (dot, _) = ui.allocate_exact_size(
-                                                                egui::vec2(7.0, 7.0),
-                                                                egui::Sense::hover(),
-                                                            );
-                                                            ui.painter().rect_filled(
-                                                                dot,
-                                                                egui::CornerRadius::same(3),
-                                                                ACCENT,
-                                                            );
-                                                            ui.add_space(6.0);
-                                                            ui.label(
-                                                                egui::RichText::new(format!(
-                                                                    "{month} 月"
-                                                                ))
-                                                                .size(13.0)
-                                                                .strong()
-                                                                .color(ACCENT_DARK),
-                                                            );
-                                                            ui.with_layout(
-                                                                egui::Layout::right_to_left(
-                                                                    egui::Align::Center,
-                                                                ),
-                                                                |ui| {
-                                                                    if ui
-                                                                        .add(
-                                                                            egui::Button::new(
-                                                                                egui::RichText::new(
-                                                                                    if month_all {
-                                                                                        "清除"
-                                                                                    } else {
-                                                                                        "全月"
-                                                                                    },
-                                                                                )
-                                                                                .size(11.5)
-                                                                                .color(TEXT_WEAK),
-                                                                            )
-                                                                            .frame(false),
-                                                                        )
-                                                                        .clicked()
-                                                                    {
-                                                                        toggles.borrow_mut().push((
-                                                                            month_days.clone(),
-                                                                            month_all,
-                                                                        ));
-                                                                    }
-                                                                },
-                                                            );
-                                                        });
-                                                        ui.add_space(4.0);
-                                                        ui.horizontal_wrapped(|ui| {
-                                                            for day in days {
-                                                                let date = NaiveDate::from_ymd_opt(
-                                                                    *year, *month, *day,
-                                                                )
-                                                                .unwrap();
-                                                                let sel = selected.contains(&date);
-                                                                if day_chip(
+                                                    ui.add_space(6.0);
+                                                    ui.horizontal(|ui| {
+                                                        let (dot, _) = ui.allocate_exact_size(
+                                                            egui::vec2(7.0, 7.0),
+                                                            egui::Sense::hover(),
+                                                        );
+                                                        ui.painter().rect_filled(
+                                                            dot,
+                                                            egui::CornerRadius::same(3),
+                                                            ACCENT,
+                                                        );
+                                                        ui.add_space(6.0);
+                                                        ui.label(
+                                                            egui::RichText::new(format!(
+                                                                "{month} 月"
+                                                            ))
+                                                            .size(13.0)
+                                                            .strong()
+                                                            .color(ACCENT_DARK),
+                                                        );
+                                                        ui.with_layout(
+                                                            egui::Layout::right_to_left(
+                                                                egui::Align::Center,
+                                                            ),
+                                                            |ui| {
+                                                                if mini_button(
                                                                     ui,
-                                                                    &format!("{day}"),
-                                                                    sel,
+                                                                    if month_all { "清除" } else { "全月" },
+                                                                    TEXT_WEAK,
                                                                 )
                                                                 .clicked()
                                                                 {
-                                                                    toggles
-                                                                        .borrow_mut()
-                                                                        .push((vec![date], sel));
+                                                                    toggles.borrow_mut().push((
+                                                                        month_days.clone(),
+                                                                        month_all,
+                                                                    ));
                                                                 }
+                                                            },
+                                                        );
+                                                    });
+                                                    ui.add_space(3.0);
+                                                    ui.horizontal_wrapped(|ui| {
+                                                        for day in days {
+                                                            let date = NaiveDate::from_ymd_opt(
+                                                                *year, *month, *day,
+                                                            )
+                                                            .unwrap();
+                                                            let sel = selected.contains(&date);
+                                                            if day_chip(
+                                                                ui,
+                                                                &format!("{day}"),
+                                                                sel,
+                                                            )
+                                                            .clicked()
+                                                            {
+                                                                toggles
+                                                                    .borrow_mut()
+                                                                    .push((vec![date], sel));
                                                             }
-                                                        });
-                                                    }
-                                                },
-                                            );
+                                                        }
+                                                    });
+                                                }
+                                            });
                                         });
                                     ui.add_space(8.0);
                                 }
