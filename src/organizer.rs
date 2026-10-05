@@ -49,6 +49,53 @@ pub fn collect_files(root: &Path, exts: &[&str]) -> Vec<PathBuf> {
         .collect()
 }
 
+fn collect_all(sources: &[PathBuf]) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    for source in sources {
+        files.extend(collect_files(source, DEFAULT_EXTENSIONS));
+    }
+    files
+}
+
+/// One row of the archive preview.
+#[derive(Debug, Clone)]
+pub struct PreviewItem {
+    pub source: PathBuf,
+    pub size: u64,
+    pub captured: String,
+    pub folder: String,
+    pub has_xmp: bool,
+}
+
+/// Resolves capture time and target folder for every file, without moving anything.
+pub fn preview(sources: &[PathBuf], mut on_event: impl FnMut(Event)) -> Vec<PreviewItem> {
+    let files = collect_all(sources);
+    let total = files.len();
+    on_event(Event::Progress(0, total));
+
+    let mut items = Vec::with_capacity(total);
+    for (index, file) in files.iter().enumerate() {
+        let dt = metadata::capture_time(file);
+        let captured = dt
+            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+            .unwrap_or_else(|| "未知".to_owned());
+        let folder = dt
+            .map(|dt| metadata::date_dir(&dt).to_string_lossy().replace('\\', "/"))
+            .unwrap_or_else(|| "unknown".to_owned());
+        let size = fs::metadata(file).map(|m| m.len()).unwrap_or(0);
+
+        items.push(PreviewItem {
+            source: file.clone(),
+            size,
+            captured,
+            folder,
+            has_xmp: xmp::sidecar_of(file).is_file(),
+        });
+        on_event(Event::Progress(index + 1, total));
+    }
+    items
+}
+
 /// Returns a destination path that does not collide with an existing file.
 pub fn unique_path(dst: &Path) -> PathBuf {
     if !dst.exists() {
@@ -138,10 +185,7 @@ pub fn organize(
     opts: &Options,
     mut on_event: impl FnMut(Event),
 ) -> Summary {
-    let mut files = Vec::new();
-    for source in sources {
-        files.extend(collect_files(source, DEFAULT_EXTENSIONS));
-    }
+    let files = collect_all(sources);
     let total = files.len();
     on_event(Event::Progress(0, total));
 

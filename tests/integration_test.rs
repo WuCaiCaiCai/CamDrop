@@ -69,3 +69,17 @@ fn organize_dry_run_keeps_source() {
     assert_eq!(summary.moved, 0);
     assert!(src.path().join("a.NEF").exists());
 }
+
+#[test]
+fn preview_lists_files_and_sidecars() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("a.NEF"), b"raw").unwrap();
+    fs::write(dir.path().join("a.NEF.xmp"), b"<xmp/>").unwrap();
+
+    let items = organizer::preview(&[dir.path().to_path_buf()], |_| {});
+
+    assert_eq!(items.len(), 1);
+    assert!(items[0].has_xmp);
+    assert_eq!(items[0].size, 3);
+    assert_ne!(items[0].folder, "unknown");
+}
