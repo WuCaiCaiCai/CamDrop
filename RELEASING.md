@@ -85,9 +85,6 @@ gh workflow run release.yml -f bump=patch    # 需要 gh 且已登录
   - AppImage 步骤 → 已用 `--appimage-extract-and-run` 规避 CI 无 FUSE。
   - Release 创建失败 → 检查 workflow permissions 是否为 Read and write。
 
-## 待验证（下次首次用 tag 流程时）
+## 待办
 
-- [ ] 用 `pwsh scripts/release.ps1 patch` 推一个 tag，确认 Actions 自动触发、四平台编译成功、
-      Release 正常出现（含 deb/rpm/AppImage/zip/tar.gz）。
-- [ ] 确认 tag 触发时 `bump` job 被跳过、`meta`/`build`/`release` 正常执行。
-- [ ] 若某步失败，按上面「失败排查」定位并修正 workflow。
+剩余工作（发布流程验证、产物核对、界面确认等）见 [TODO.md](TODO.md)。

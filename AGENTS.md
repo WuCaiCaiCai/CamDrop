@@ -39,3 +39,7 @@ with auto-generated notes. A manual `workflow_dispatch` fallback also exists, bu
 needs GitHub API auth — prefer the tag-push flow.
 
 Full details, prerequisites, and manual fallbacks: [RELEASING.md](RELEASING.md).
+
+## Remaining work
+
+Tracked in [TODO.md](TODO.md).
