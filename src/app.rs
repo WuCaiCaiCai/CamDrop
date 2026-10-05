@@ -881,25 +881,35 @@ impl eframe::App for CamDropApp {
                                             .show(
                                                 ui,
                                                 |ui| {
-                                                    if ui
-                                                        .add(
-                                                            egui::Button::new(
-                                                                egui::RichText::new(if year_all {
-                                                                    "全不选"
-                                                                } else {
-                                                                    "全选"
-                                                                })
-                                                                .size(11.5)
-                                                                .color(ACCENT_DARK),
-                                                            )
-                                                            .frame(false),
-                                                        )
-                                                        .clicked()
-                                                    {
-                                                        toggles
-                                                            .borrow_mut()
-                                                            .push((year_days.clone(), year_all));
-                                                    }
+                                                    ui.with_layout(
+                                                        egui::Layout::right_to_left(
+                                                            egui::Align::Center,
+                                                        ),
+                                                        |ui| {
+                                                            if ui
+                                                                .add(
+                                                                    egui::Button::new(
+                                                                        egui::RichText::new(
+                                                                            if year_all {
+                                                                                "全不选"
+                                                                            } else {
+                                                                                "全选"
+                                                                            },
+                                                                        )
+                                                                        .size(11.5)
+                                                                        .color(ACCENT_DARK),
+                                                                    )
+                                                                    .frame(false),
+                                                                )
+                                                                .clicked()
+                                                            {
+                                                                toggles.borrow_mut().push((
+                                                                    year_days.clone(),
+                                                                    year_all,
+                                                                ));
+                                                            }
+                                                        },
+                                                    );
 
                                                     for (month, days) in months {
                                                         let month_days: Vec<NaiveDate> = days
@@ -935,29 +945,35 @@ impl eframe::App for CamDropApp {
                                                                 .strong()
                                                                 .color(ACCENT_DARK),
                                                             );
-                                                            ui.add_space(12.0);
-                                                            if ui
-                                                                .add(
-                                                                    egui::Button::new(
-                                                                        egui::RichText::new(
-                                                                            if month_all {
-                                                                                "清除"
-                                                                            } else {
-                                                                                "全月"
-                                                                            },
+                                                            ui.with_layout(
+                                                                egui::Layout::right_to_left(
+                                                                    egui::Align::Center,
+                                                                ),
+                                                                |ui| {
+                                                                    if ui
+                                                                        .add(
+                                                                            egui::Button::new(
+                                                                                egui::RichText::new(
+                                                                                    if month_all {
+                                                                                        "清除"
+                                                                                    } else {
+                                                                                        "全月"
+                                                                                    },
+                                                                                )
+                                                                                .size(11.5)
+                                                                                .color(TEXT_WEAK),
+                                                                            )
+                                                                            .frame(false),
                                                                         )
-                                                                        .size(11.5)
-                                                                        .color(TEXT_WEAK),
-                                                                    )
-                                                                    .frame(false),
-                                                                )
-                                                                .clicked()
-                                                            {
-                                                                toggles.borrow_mut().push((
-                                                                    month_days.clone(),
-                                                                    month_all,
-                                                                ));
-                                                            }
+                                                                        .clicked()
+                                                                    {
+                                                                        toggles.borrow_mut().push((
+                                                                            month_days.clone(),
+                                                                            month_all,
+                                                                        ));
+                                                                    }
+                                                                },
+                                                            );
                                                         });
                                                         ui.add_space(4.0);
                                                         ui.horizontal_wrapped(|ui| {
