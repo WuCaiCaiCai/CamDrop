@@ -1,11 +1,11 @@
 //! Safe file movement and the date-based migration pipeline.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use chrono::{Datelike, NaiveDate};
+use chrono::NaiveDate;
 use walkdir::WalkDir;
 
 use crate::metadata;
@@ -13,17 +13,13 @@ use crate::xmp;
 use crate::{DEFAULT_EXTENSIONS, has_extension};
 
 /// Selects which files to migrate, by capture date.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum DateFilter {
     /// Every file.
     #[default]
     All,
-    /// A single year.
-    Year(i32),
-    /// A single month of a year.
-    Month(i32, u32),
-    /// A single day of a month.
-    Day(i32, u32, u32),
+    /// Only files captured on one of these days.
+    Days(BTreeSet<NaiveDate>),
 }
 
 impl DateFilter {
@@ -33,19 +29,13 @@ impl DateFilter {
     pub fn matches(&self, date: Option<NaiveDate>) -> bool {
         match self {
             Self::All => true,
-            Self::Year(year) => date.is_some_and(|d| d.year() == *year),
-            Self::Month(year, month) => {
-                date.is_some_and(|d| d.year() == *year && d.month() == *month)
-            }
-            Self::Day(year, month, day) => {
-                date.is_some_and(|d| d.year() == *year && d.month() == *month && d.day() == *day)
-            }
+            Self::Days(days) => date.is_some_and(|d| days.contains(&d)),
         }
     }
 }
 
 /// Migration options.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Options {
     /// Copy instead of moving the source files.
     pub copy_only: bool,

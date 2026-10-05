@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fs;
 
 use camdrop::organizer::{self, DateFilter, Options};
@@ -86,16 +87,18 @@ fn preview_lists_files_and_sidecars() {
 }
 
 #[test]
-fn date_filter_matches_requested_granularity() {
-    let day = Some(NaiveDate::from_ymd_opt(2026, 9, 24).unwrap());
+fn date_filter_matches_selected_days() {
+    let day = NaiveDate::from_ymd_opt(2026, 9, 24).unwrap();
+    let other = NaiveDate::from_ymd_opt(2026, 9, 25).unwrap();
 
-    assert!(DateFilter::All.matches(day));
+    assert!(DateFilter::All.matches(Some(day)));
     assert!(DateFilter::All.matches(None));
-    assert!(DateFilter::Year(2026).matches(day));
-    assert!(!DateFilter::Year(2025).matches(day));
-    assert!(DateFilter::Month(2026, 9).matches(day));
-    assert!(!DateFilter::Month(2026, 10).matches(day));
-    assert!(DateFilter::Day(2026, 9, 24).matches(day));
-    assert!(!DateFilter::Day(2026, 9, 25).matches(day));
-    assert!(!DateFilter::Year(2026).matches(None));
+
+    let mut selected = BTreeSet::new();
+    selected.insert(day);
+    let filter = DateFilter::Days(selected);
+
+    assert!(filter.matches(Some(day)));
+    assert!(!filter.matches(Some(other)));
+    assert!(!filter.matches(None));
 }
