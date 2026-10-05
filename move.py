@@ -5,8 +5,8 @@ from datetime import datetime
 from tqdm import tqdm
 
 # ---------------- 配置 ----------------
-src_folder = r"F:\DCIM\120D300S"      # 源目录
-dst_folder = r"E:\Photograph\RAW"     # 目标目录
+src_folder = r"X:\DCIM\100MEDIA"      # 源目录（示例路径，请改成你自己的）
+dst_folder = r"C:\Photos\RAW"         # 目标目录（示例路径，请改成你自己的）
 extensions = (".jpg", ".jpeg", ".nef", ".mp4", ".mov")  # 支持格式
 # -------------------------------------
 
