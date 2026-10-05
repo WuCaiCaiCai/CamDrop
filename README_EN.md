@@ -1,66 +1,37 @@
 # CamDrop
 
-> A camera memory card archiver: finds the card automatically, sorts photos and videos into date folders, and moves Darktable / Lightroom `.xmp` sidecars along with them.
+[![GitHub stars](https://img.shields.io/github/stars/WuCaiCaiCai/CamDrop?style=social)](https://github.com/WuCaiCaiCai/CamDrop/stargazers)
+[![Release](https://img.shields.io/github/v/release/WuCaiCaiCai/CamDrop?sort=semver)](https://github.com/WuCaiCaiCai/CamDrop/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/rust-1.94%2B-orange.svg?logo=rust&logoColor=white)](https://www.rust-lang.org)
 
-🌐 English | [简体中文](README.md)
+[简体中文](README.md)
 
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+CamDrop is a camera memory card archiver. After you insert a card, it scans the mounted disks to find the card, reads each photo's capture time, sorts the photos and videos into `year/month_day` folders, moves them to the destination, and takes the matching `.xmp` sidecars along. It is written in Rust, compiles to a single executable, and ships with a small egui interface.
 
-## 📖 Introduction
+[Features](#features) • [Installation](#installation) • [Usage](#usage) • [Development](#development) • [License](#license)
 
-CamDrop is a small desktop tool written in Rust. After you insert a camera card, it scans the mounted disks, identifies the card by the RAW files it contains, then sorts the photos and videos into `year/month_day` folders and moves them to the destination. Any `.xmp` file with the same name as a photo is moved together with it.
+## Features
 
-The interface is built with eframe / egui. It compiles to a single executable with no Python or other runtime dependency.
+* Automatic card detection: scans mounted disks and identifies the card by RAW files such as `.nef`, `.cr3`, `.arw`, `.dng`.
+* Date-based archiving: uses EXIF `DateTimeOriginal` to build the folder, falling back to the file modification time.
+* XMP sync: moves the matching `.xmp` with each photo, then rescans the card and re-matches any leftover sidecars.
+* Safe cross-drive moves: falls back to copy + delete when `rename` returns CrossesDevices.
+* Read-only handling: clears the read-only attribute and retries when deletion fails.
+* Collision handling: appends `_1`, `_2` instead of overwriting an existing file.
+* Dry run: prints the archive plan without touching any file.
 
-## ✨ Features
+Archiving handles `.jpg` `.jpeg` `.nef` `.cr3` `.arw` `.dng` `.mp4` `.mov`; detection also recognises `.raf` `.orf` `.rw2` `.pef` `.srw` `.nrw`.
 
-### 🎯 Core
+## Installation
 
-| Feature | Description |
-|---------|-------------|
-| Automatic card detection | Scans mounted disks and identifies the card by RAW files such as `.nef`, `.cr3`, `.arw`, `.dng`. Windows skips the system drive; Linux looks under `/media`, `/mnt` and `/run/media`; macOS looks under `/Volumes` |
-| Date-based archiving | Uses EXIF `DateTimeOriginal` to build the folder; falls back to the file modification time when it is missing |
-| XMP sync | Moves the matching `.xmp` with each photo, then rescans the card and re-matches any leftover sidecars by file name |
-| Safe cross-drive moves | Falls back to copy + delete when `rename` returns CrossesDevices |
-| Read-only handling | Clears the read-only attribute and retries when deletion fails |
-| Collision handling | Appends `_1`, `_2` instead of overwriting an existing file |
+### Download a prebuilt binary
 
-### 🖥️ Interface
+Get the binary for your platform from the [Releases](https://github.com/WuCaiCaiCai/CamDrop/releases) page and run it.
 
-| Feature | Description |
-|---------|-------------|
-| Selectable source cards | Detected cards are listed and can be multi-selected; use "Add folder" when detection fails |
-| Destination folder | Defaults to `RAW` next to the executable, changeable via "Browse" |
-| Copy only | Keeps the card files and copies a second set to the destination |
-| Dry run | Prints the archive plan without touching any file |
-| Progress and log | Runs on a background thread, shows a progress bar and logs the result of every file, flagging failures |
+### Build from source
 
-### 🧩 Supported formats
-
-| Type | Extensions |
-|------|------------|
-| Photos | `.jpg` `.jpeg` `.nef` `.cr3` `.arw` `.dng` |
-| Videos | `.mp4` `.mov` |
-| RAW signatures for detection | Besides the archive list, `.raf` `.orf` `.rw2` `.pef` `.srw` `.nrw` |
-
-## 🚀 Quick Start
-
-### Requirements
-
-| Item | Requirement |
-|------|-------------|
-| OS | Windows / Linux / macOS |
-| Graphics | OpenGL (provided by the GPU driver) |
-| CJK font | A Chinese font must be installed: Microsoft YaHei on Windows, Noto CJK or wqy on Linux, PingFang on macOS (read from the system, not bundled) |
-| Toolchain | Rust 1.94 or newer stable |
-
-### Option 1: Download a prebuilt binary (recommended)
-
-1. Open the [Releases](../../releases) page
-2. Download the binary for your platform
-3. Run it
-
-### Option 2: Build from source
+Rust 1.94 or newer stable is required.
 
 ```bash
 git clone https://github.com/WuCaiCaiCai/CamDrop.git
@@ -70,26 +41,31 @@ cargo build --release
 
 The output is under `target/release/`: `camdrop` on Linux / macOS, `camdrop.exe` on Windows.
 
-## 📖 Usage
+### Install with cargo
 
-### Steps
+```bash
+cargo install --git https://github.com/WuCaiCaiCai/CamDrop.git
+```
 
-| Step | Action |
-|------|--------|
-| 1 | Run the program and wait for the scan to finish; detected cards are listed |
-| 2 | Select the cards to archive, or click "Add folder" if none was detected |
-| 3 | Confirm the destination folder (defaults to `RAW` next to the executable) |
-| 4 | Toggle "Copy only" or "Dry run" as needed |
-| 5 | Click "Start" and watch the log area |
+### Requirements
 
-### Options
+* OS: Windows, Linux or macOS.
+* Graphics: OpenGL, provided by the GPU driver.
+* CJK font: the UI is in Chinese and looks for a system font at startup (Microsoft YaHei on Windows, Noto CJK or wqy on Linux, PingFang on macOS). The font is not bundled.
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| Copy only | Off | Keep the card files and copy to the destination |
-| Dry run | Off | Print the plan only, no move or copy |
+## Usage
 
-## 📁 Archive layout
+After launching the program:
+
+1. Wait for the scan to finish; detected cards are listed.
+2. Select the cards to archive, or click "Add folder" if none was detected.
+3. Confirm the destination folder, which defaults to `RAW` next to the executable.
+4. Toggle "Copy only" or "Dry run" as needed.
+5. Click "Start" and watch the log area for the result of each file.
+
+"Copy only" keeps the card files and copies a second set to the destination. "Dry run" prints the plan without moving or copying anything.
+
+### Archive layout
 
 ```text
 RAW/
@@ -102,7 +78,28 @@ RAW/
         └── DSC_2048.NEF
 ```
 
-## 🗂️ Project layout
+### Platform notes
+
+| Platform | Detection scope |
+|----------|-----------------|
+| Windows | Every drive except the system drive |
+| Linux | `/media`, `/mnt`, `/run/media` |
+| macOS | `/Volumes` |
+
+Detection relies on these mount conventions. If your card is mounted elsewhere, use "Add folder" to pick it manually.
+
+## Development
+
+```bash
+cargo fmt
+cargo clippy --all-targets -- -D warnings
+cargo test
+cargo build --release
+```
+
+The release profile enables size optimizations (`opt-level = "z"`, LTO, `strip`). The Windows binary is about 5.7 MB.
+
+## Project layout
 
 ```text
 src/
@@ -117,32 +114,20 @@ tests/
 └── integration_test.rs
 ```
 
-## ⚠️ Notes
+## Notes
 
-- Archiving moves files and removes them from the card by default. Use "Dry run" first if unsure.
-- Detection relies on conventional mount points. A card mounted elsewhere may not be found; use "Add folder" in that case.
-- On Windows, every disk except the system drive that contains RAW files is listed, including data disks you already copied from.
-- The UI is Chinese. Without an installed Chinese font, text shows as boxes.
+* Archiving moves files and removes them from the card by default. Try "Dry run" first.
+* On Windows, data disks that contain RAW files are also listed as candidates.
+* Without a Chinese font installed, the UI text shows as boxes.
 
-## 🛠️ Development
+## Credits
 
-```bash
-cargo fmt
-cargo clippy --all-targets -- -D warnings
-cargo test
-cargo build --release
-```
+* [eframe / egui](https://github.com/emilk/egui) — window and UI
+* [nom-exif](https://github.com/mindeng/nom-exif) — EXIF parsing
+* [sysinfo](https://github.com/GuillaumeGomez/sysinfo) — mount enumeration
+* [walkdir](https://github.com/BurntSushi/walkdir) — directory traversal
+* [rfd](https://github.com/PolyMeilex/rfd) — native file dialogs
 
-The release profile enables size optimizations (`opt-level = "z"`, LTO, `strip`). The Windows binary is about 5.7 MB.
+## License
 
-## 🙏 Credits
-
-- [eframe / egui](https://github.com/emilk/egui) — window and UI
-- [nom-exif](https://github.com/mindeng/nom-exif) — EXIF parsing
-- [sysinfo](https://github.com/GuillaumeGomez/sysinfo) — mount enumeration
-- [walkdir](https://github.com/BurntSushi/walkdir) — directory traversal
-- [rfd](https://github.com/PolyMeilex/rfd) — native file dialogs
-
-## 📄 License
-
-[MIT](LICENSE)
+CamDrop is released under the [MIT](LICENSE) license.
