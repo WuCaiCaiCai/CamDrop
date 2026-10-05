@@ -44,8 +44,8 @@ Write-Host "Release bump ($Bump): $current -> $version"
 $updated = [regex]::Replace($content, '(?m)^version\s*=\s*"\d+\.\d+\.\d+"', "version = `"$version`"", 1)
 [System.IO.File]::WriteAllText((Resolve-Path $cargoPath), $updated)
 
-Write-Host "Building release (also refreshes Cargo.lock)..."
-cargo build --release
+Write-Host "Refreshing Cargo.lock (no local build; GitHub Actions does the build)..."
+cargo update -p camdrop
 
 git add Cargo.toml Cargo.lock
 git commit -m "chore(release): $tag"

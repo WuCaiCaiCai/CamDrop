@@ -97,6 +97,7 @@ jobs:
   build:
     name: Build ${{ matrix.name }}
     needs: [meta]
+    if: ${{ always() && needs.meta.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:
@@ -206,6 +207,7 @@ jobs:
   release:
     name: Publish GitHub Release
     needs: [meta, build]
+    if: ${{ always() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
