@@ -402,21 +402,24 @@ fn apply_style(ctx: &egui::Context) {
     visuals.menu_corner_radius = egui::CornerRadius::same(9);
     visuals.override_text_color = Some(TEXT);
 
+    visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::same(8);
+    visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, BORDER);
+    visuals.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, TEXT);
+
     for widget in [
-        &mut visuals.widgets.noninteractive,
         &mut visuals.widgets.inactive,
         &mut visuals.widgets.hovered,
         &mut visuals.widgets.active,
         &mut visuals.widgets.open,
     ] {
         widget.corner_radius = egui::CornerRadius::same(8);
-        widget.bg_stroke = egui::Stroke::new(1.0, BORDER);
+        widget.bg_stroke = egui::Stroke::NONE;
         widget.fg_stroke = egui::Stroke::new(1.0, TEXT);
     }
     visuals.widgets.inactive.weak_bg_fill = SURFACE_HI;
     visuals.widgets.inactive.bg_fill = SURFACE_HI;
     visuals.widgets.hovered.weak_bg_fill = egui::Color32::from_rgb(214, 230, 240);
-    visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, ACCENT);
+    visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, ACCENT.gamma_multiply(0.65));
     visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, TEXT);
     visuals.widgets.active.weak_bg_fill = ACCENT;
     visuals.widgets.active.bg_fill = ACCENT;
@@ -749,7 +752,8 @@ impl eframe::App for CamDropApp {
                             });
                             ui.add_space(8.0);
                             let can = !self.busy && !self.cards.is_empty();
-                            if action_button(ui, "继续", SURFACE_HI, TEXT, 40.0, can).clicked() {
+                            if action_button(ui, "继续  →", ACCENT, ON_ACCENT, 44.0, can).clicked()
+                            {
                                 self.step = Step::Scan;
                             }
                             ui.add_space(8.0);
@@ -897,7 +901,8 @@ impl eframe::App for CamDropApp {
                                 }
                             }
                             ui.add_space(8.0);
-                            if action_button(ui, "继续", SURFACE_HI, TEXT, 40.0, true).clicked() {
+                            if action_button(ui, "继续  →", ACCENT, ON_ACCENT, 44.0, true).clicked()
+                            {
                                 self.step = Step::Migrate;
                             }
                             ui.add_space(8.0);
@@ -919,8 +924,18 @@ impl eframe::App for CamDropApp {
                             ui.add_space(6.0);
                             ui.label("方式");
                             ui.horizontal(|ui| {
-                                ui.radio_value(&mut self.copy_only, false, "移动（删除源文件）");
-                                ui.radio_value(&mut self.copy_only, true, "复制（保留源文件）");
+                                if chip_button(ui, "移动", !self.copy_only).clicked() {
+                                    self.copy_only = false;
+                                }
+                                if chip_button(ui, "复制", self.copy_only).clicked() {
+                                    self.copy_only = true;
+                                }
+                                ui.add_space(6.0);
+                                ui.weak(if self.copy_only {
+                                    "保留源文件"
+                                } else {
+                                    "删除源文件"
+                                });
                             });
                             ui.add_space(6.0);
                             ui.label("目标目录");
