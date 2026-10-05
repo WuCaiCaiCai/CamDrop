@@ -84,7 +84,7 @@ RAW/
 
 | Platform | Detection scope |
 |----------|-----------------|
-| Windows | Every drive except the system drive |
+| Windows | Removable drives (card readers); internal disks are not listed |
 | Linux | `/media`, `/mnt`, `/run/media` |
 | macOS | `/Volumes` |
 
@@ -119,7 +119,7 @@ tests/
 ## Notes
 
 * "Move" removes the source files from the card by default, so scan and check the preview first, or choose "Copy".
-* On Windows, data disks that contain RAW files are also listed as candidates.
+* On Windows only removable drives (card readers) are listed, so built-in disks are never treated as a card.
 * Without a Chinese font installed, the UI text shows as boxes.
 
 ## Credits

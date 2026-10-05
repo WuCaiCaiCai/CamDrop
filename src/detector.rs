@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use sysinfo::Disks;
+use sysinfo::{Disk, Disks};
 use walkdir::WalkDir;
 
 use crate::has_extension;
@@ -14,8 +14,8 @@ pub const RAW_SIGNATURES: &[&str] = &[
 
 /// Scans mounted disks and returns roots that look like camera cards.
 ///
-/// System drives are skipped, `DCIM` is preferred as the scan root, and a
-/// shallow walk (depth 4) confirms a RAW signature is present.
+/// Fixed internal drives are skipped, `DCIM` is preferred as the scan root, and
+/// a shallow walk (depth 4) confirms a RAW signature is present.
 pub fn detect_cards() -> Vec<PathBuf> {
     let system = std::env::var("SystemDrive").ok();
     let disks = Disks::new_with_refreshed_list();
@@ -23,7 +23,7 @@ pub fn detect_cards() -> Vec<PathBuf> {
 
     for disk in disks.list() {
         let mount = disk.mount_point();
-        if !is_candidate_mount(mount, system.as_deref()) {
+        if !is_removable(disk) || !is_candidate_mount(mount, system.as_deref()) {
             continue;
         }
         let root = candidate_root(mount);
@@ -32,6 +32,17 @@ pub fn detect_cards() -> Vec<PathBuf> {
         }
     }
     cards
+}
+
+/// Only removable media counts as a camera card, so built-in drives are ignored.
+#[cfg(windows)]
+fn is_removable(disk: &Disk) -> bool {
+    disk.is_removable()
+}
+
+#[cfg(not(windows))]
+fn is_removable(_disk: &Disk) -> bool {
+    true
 }
 
 fn candidate_root(mount: &Path) -> PathBuf {
