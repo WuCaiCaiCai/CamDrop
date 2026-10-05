@@ -1,12 +1,13 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
+use chrono::Datelike;
 use eframe::egui;
 
 use camdrop::detector;
-use camdrop::organizer::{self, Event, Options, PreviewItem};
+use camdrop::organizer::{self, DateFilter, Event, Options, PreviewItem};
 
 enum Msg {
     Cards(Vec<PathBuf>),
@@ -22,6 +23,14 @@ enum ViewMode {
     Tree,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FilterMode {
+    All,
+    Year,
+    Month,
+    Day,
+}
+
 struct Card {
     path: PathBuf,
     selected: bool,
@@ -35,7 +44,10 @@ pub struct CamDropApp {
     view: ViewMode,
     target: String,
     copy_only: bool,
-    dry_run: bool,
+    filter_mode: FilterMode,
+    filter_year: i32,
+    filter_month: u32,
+    filter_day: u32,
     detecting: bool,
     scanning: bool,
     busy: bool,
@@ -73,7 +85,10 @@ impl CamDropApp {
             view: ViewMode::Files,
             target,
             copy_only: false,
-            dry_run: false,
+            filter_mode: FilterMode::All,
+            filter_year: 0,
+            filter_month: 1,
+            filter_day: 1,
             detecting: true,
             scanning: false,
             busy: false,
@@ -90,6 +105,58 @@ impl CamDropApp {
             .filter(|c| c.selected)
             .map(|c| c.path.clone())
             .collect()
+    }
+
+    fn current_filter(&self) -> DateFilter {
+        match self.filter_mode {
+            FilterMode::All => DateFilter::All,
+            FilterMode::Year => DateFilter::Year(self.filter_year),
+            FilterMode::Month => DateFilter::Month(self.filter_year, self.filter_month),
+            FilterMode::Day => {
+                DateFilter::Day(self.filter_year, self.filter_month, self.filter_day)
+            }
+        }
+    }
+
+    /// Distinct years, months (within the selected year) and days (within the
+    /// selected month) present in the scanned files.
+    fn available_dates(&self) -> (Vec<i32>, Vec<u32>, Vec<u32>) {
+        let mut years = BTreeSet::new();
+        let mut months = BTreeSet::new();
+        let mut days = BTreeSet::new();
+        for item in &self.preview {
+            let Some(date) = item.date else {
+                continue;
+            };
+            years.insert(date.year());
+            if date.year() == self.filter_year {
+                months.insert(date.month());
+                if date.month() == self.filter_month {
+                    days.insert(date.day());
+                }
+            }
+        }
+        (
+            years.into_iter().collect(),
+            months.into_iter().collect(),
+            days.into_iter().collect(),
+        )
+    }
+
+    /// Keeps the selected year/month/day pointing at values that exist.
+    fn sync_filter(&mut self) {
+        let (years, _, _) = self.available_dates();
+        if !years.is_empty() && !years.contains(&self.filter_year) {
+            self.filter_year = years[0];
+        }
+        let (_, months, _) = self.available_dates();
+        if !months.is_empty() && !months.contains(&self.filter_month) {
+            self.filter_month = months[0];
+        }
+        let (_, _, days) = self.available_dates();
+        if !days.is_empty() && !days.contains(&self.filter_day) {
+            self.filter_day = days[0];
+        }
     }
 
     fn rescan_cards(&mut self, ctx: &egui::Context) {
@@ -117,7 +184,7 @@ impl CamDropApp {
         let tx = self.tx.clone();
         let ctx = ctx.clone();
         thread::spawn(move || {
-            let items = organizer::preview(&sources, |event| {
+            let items = organizer::preview(&sources, &Options::default(), |event| {
                 if let Event::Progress(done, total) = event {
                     let _ = tx.send(Msg::Progress(done, total));
                     ctx.request_repaint();
@@ -138,7 +205,8 @@ impl CamDropApp {
         let target = PathBuf::from(self.target.clone());
         let opts = Options {
             copy_only: self.copy_only,
-            dry_run: self.dry_run,
+            dry_run: false,
+            filter: self.current_filter(),
         };
         let tx = self.tx.clone();
         let ctx = ctx.clone();
@@ -353,6 +421,7 @@ impl eframe::App for CamDropApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.drain_messages();
+        self.sync_filter();
 
         egui::Panel::top("header").show(ui, |ui| {
             ui.add_space(6.0);
@@ -473,11 +542,85 @@ impl eframe::App for CamDropApp {
                         self.target = dir.display().to_string();
                     }
                 });
-                ui.checkbox(&mut self.copy_only, "仅复制（保留源文件）");
-                ui.checkbox(&mut self.dry_run, "试运行（不修改文件）");
+
+                ui.label("方式");
+                ui.horizontal(|ui| {
+                    ui.radio_value(&mut self.copy_only, false, "移动（删除源文件）");
+                    ui.radio_value(&mut self.copy_only, true, "复制（保留源文件）");
+                });
+
+                ui.label("时间筛选");
+                let (years, months, days) = self.available_dates();
+                ui.horizontal(|ui| {
+                    egui::ComboBox::from_id_salt("filter_mode")
+                        .selected_text(match self.filter_mode {
+                            FilterMode::All => "全部",
+                            FilterMode::Year => "按年",
+                            FilterMode::Month => "按月",
+                            FilterMode::Day => "按天",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.filter_mode, FilterMode::All, "全部");
+                            ui.selectable_value(&mut self.filter_mode, FilterMode::Year, "按年");
+                            ui.selectable_value(&mut self.filter_mode, FilterMode::Month, "按月");
+                            ui.selectable_value(&mut self.filter_mode, FilterMode::Day, "按天");
+                        });
+                    if matches!(
+                        self.filter_mode,
+                        FilterMode::Year | FilterMode::Month | FilterMode::Day
+                    ) {
+                        egui::ComboBox::from_id_salt("filter_year")
+                            .width(70.0)
+                            .selected_text(self.filter_year.to_string())
+                            .show_ui(ui, |ui| {
+                                for year in &years {
+                                    ui.selectable_value(
+                                        &mut self.filter_year,
+                                        *year,
+                                        year.to_string(),
+                                    );
+                                }
+                            });
+                    }
+                    if matches!(self.filter_mode, FilterMode::Month | FilterMode::Day) {
+                        egui::ComboBox::from_id_salt("filter_month")
+                            .width(58.0)
+                            .selected_text(format!("{:02}", self.filter_month))
+                            .show_ui(ui, |ui| {
+                                for month in &months {
+                                    ui.selectable_value(
+                                        &mut self.filter_month,
+                                        *month,
+                                        format!("{month:02}"),
+                                    );
+                                }
+                            });
+                    }
+                    if matches!(self.filter_mode, FilterMode::Day) {
+                        egui::ComboBox::from_id_salt("filter_day")
+                            .width(58.0)
+                            .selected_text(format!("{:02}", self.filter_day))
+                            .show_ui(ui, |ui| {
+                                for day in &days {
+                                    ui.selectable_value(
+                                        &mut self.filter_day,
+                                        *day,
+                                        format!("{day:02}"),
+                                    );
+                                }
+                            });
+                    }
+                });
 
                 ui.add_space(8.0);
-                let can_migrate = !self.busy && !self.scanning && !self.cards.is_empty();
+                let filter = self.current_filter();
+                let shown_count = self
+                    .preview
+                    .iter()
+                    .filter(|item| filter.matches(item.date))
+                    .count();
+                let can_migrate =
+                    !self.busy && !self.scanning && !self.cards.is_empty() && shown_count > 0;
                 let start = ui
                     .add_enabled_ui(can_migrate, |ui| {
                         ui.add_sized(
@@ -496,7 +639,19 @@ impl eframe::App for CamDropApp {
             });
 
         egui::CentralPanel::default().show(ui, |ui| {
-            let total_size: u64 = self.preview.iter().map(|i| i.size).sum();
+            let filter = self.current_filter();
+            let shown_len = self
+                .preview
+                .iter()
+                .filter(|item| filter.matches(item.date))
+                .count();
+            let total_size: u64 = self
+                .preview
+                .iter()
+                .filter(|item| filter.matches(item.date))
+                .map(|i| i.size)
+                .sum();
+
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 ui.strong("预览");
@@ -507,24 +662,28 @@ impl eframe::App for CamDropApp {
                     if self.scanning {
                         ui.spinner();
                     }
-                    ui.weak(format!(
-                        "{} 个文件 · {}",
-                        self.preview.len(),
-                        human_size(total_size)
-                    ));
+                    ui.weak(format!("{shown_len} 个文件 · {}", human_size(total_size)));
                 });
             });
             ui.separator();
 
-            if self.preview.is_empty() {
+            if shown_len == 0 {
                 ui.add_space(20.0);
                 if self.scanning {
                     ui.weak("正在扫描…");
-                } else {
+                } else if self.preview.is_empty() {
                     ui.weak("在左侧选择来源，然后点击「扫描所选来源」查看迁移计划。");
+                } else {
+                    ui.weak("当前筛选条件下没有文件。");
                 }
                 return;
             }
+
+            let shown: Vec<&PreviewItem> = self
+                .preview
+                .iter()
+                .filter(|item| filter.matches(item.date))
+                .collect();
 
             match self.view {
                 ViewMode::Files => {
@@ -544,7 +703,7 @@ impl eframe::App for CamDropApp {
                                     ui.strong("XMP");
                                     ui.end_row();
 
-                                    for item in &self.preview {
+                                    for item in &shown {
                                         ui.label(file_name(item));
                                         ui.label(human_size(item.size));
                                         ui.label(&item.captured);
@@ -557,7 +716,7 @@ impl eframe::App for CamDropApp {
                 }
                 ViewMode::Tree => {
                     let mut groups: BTreeMap<&str, Vec<&PreviewItem>> = BTreeMap::new();
-                    for item in &self.preview {
+                    for item in &shown {
                         groups.entry(item.folder.as_str()).or_default().push(item);
                     }
                     egui::ScrollArea::vertical()
