@@ -730,19 +730,23 @@ impl eframe::App for CamDropApp {
             .max_size(440.0)
             .resizable(true)
             .show(ui, |ui| {
-                // Primary action: always visible at the top of the workflow panel.
-                if action_button(ui, "开始迁移", ACCENT, ON_ACCENT, 46.0, !self.busy).clicked()
-                {
-                    self.try_migrate(&ctx);
-                }
-                ui.add_space(6.0);
-                ui.separator();
-                ui.add_space(6.0);
+                let full = ui.available_rect_before_wrap();
+                let _ = ui.allocate_rect(full, egui::Sense::hover());
+                let footer_h = 64.0;
+                let body_rect = egui::Rect::from_min_max(
+                    full.min,
+                    egui::pos2(full.right(), full.bottom() - footer_h),
+                );
+                let footer_rect = egui::Rect::from_min_max(
+                    egui::pos2(full.left(), full.bottom() - footer_h),
+                    full.max,
+                );
 
-                egui::ScrollArea::vertical()
-                    .id_salt("controls_scroll")
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
+                ui.scope_builder(egui::UiBuilder::new().max_rect(body_rect), |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("controls_scroll")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
                         ui.label(
                             egui::RichText::new(self.status_line())
                                 .size(13.0)
@@ -1130,6 +1134,17 @@ impl eframe::App for CamDropApp {
                             ui.add_space(12.0);
                         }
                     });
+                });
+
+                ui.scope_builder(egui::UiBuilder::new().max_rect(footer_rect), |ui| {
+                    ui.add_space(4.0);
+                    ui.separator();
+                    ui.add_space(6.0);
+                    if action_button(ui, "开始迁移", ACCENT, ON_ACCENT, 46.0, !self.busy).clicked()
+                    {
+                        self.try_migrate(&ctx);
+                    }
+                });
             });
 
         // Central preview.
