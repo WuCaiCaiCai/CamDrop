@@ -14,6 +14,10 @@ Remaining work for CamDrop. Check items off as they are done.
       deb/rpm/AppImage steps have not been verified yet (first run was still in progress).
 - [ ] Confirm the repository Actions workflow permissions are set to **Read and write**
       (required to create the Release).
+- [ ] Drop macOS x86_64 (Intel) support: remove the `macos-13` / `x86_64-apple-darwin`
+      entry from the build matrix in `.github/workflows/release.yml`, leaving Apple
+      Silicon only (`macos-14` / `aarch64-apple-darwin`). Update README / RELEASING docs
+      to reflect macOS arm64 only.
 
 ## UI
 
