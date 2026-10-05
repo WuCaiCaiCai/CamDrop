@@ -873,11 +873,13 @@ impl eframe::App for CamDropApp {
                                 let toggles: RefCell<Vec<(Vec<NaiveDate>, bool)>> =
                                     RefCell::new(Vec::new());
 
-                                egui::Frame::group(ui.style())
+                                egui::Frame::new()
                                     .fill(SURFACE)
+                                    .stroke(egui::Stroke::new(1.0, BORDER))
                                     .corner_radius(egui::CornerRadius::same(8))
                                     .inner_margin(egui::Margin::same(8))
                                     .show(ui, |ui| {
+                                        let mut first_year = true;
                                         for (year, months) in &tree {
                                             let year_days: Vec<NaiveDate> = months
                                                 .iter()
@@ -891,88 +893,109 @@ impl eframe::App for CamDropApp {
                                             let year_all =
                                                 year_days.iter().all(|d| selected.contains(d));
 
-                                            egui::CollapsingHeader::new(
-                                                egui::RichText::new(format!("{year} 年"))
-                                                    .size(14.0)
-                                                    .strong()
-                                                    .color(TEXT),
-                                            )
-                                            .id_salt(("year", *year))
-                                            .default_open(true)
-                                            .show(
-                                                ui,
-                                                |ui| {
-                                                    if ui
-                                                        .add(
-                                                            egui::Button::new(
-                                                                egui::RichText::new(if year_all {
-                                                                    "全不选"
-                                                                } else {
-                                                                    "全选"
-                                                                })
-                                                                .size(12.0)
-                                                                .color(ACCENT_DARK),
-                                                            )
-                                                            .frame(false),
-                                                        )
-                                                        .clicked()
+                                            if !first_year {
+                                                ui.add_space(8.0);
+                                            }
+                                            first_year = false;
+
+                                            // Year band: the top level.
+                                            egui::Frame::new()
+                                                .fill(SURFACE_ALT)
+                                                .corner_radius(egui::CornerRadius::same(6))
+                                                .inner_margin(egui::Margin::symmetric(8, 4))
+                                                .show(ui, |ui| {
+                                                    ui.horizontal(|ui| {
+                                                        let (bar, _) = ui.allocate_exact_size(
+                                                            egui::vec2(3.0, 16.0),
+                                                            egui::Sense::hover(),
+                                                        );
+                                                        ui.painter().rect_filled(
+                                                            bar,
+                                                            egui::CornerRadius::same(2),
+                                                            ACCENT,
+                                                        );
+                                                        ui.add_space(6.0);
+                                                        ui.label(
+                                                            egui::RichText::new(format!(
+                                                                "{year} 年"
+                                                            ))
+                                                            .size(14.0)
+                                                            .strong(),
+                                                        );
+                                                        ui.with_layout(
+                                                            egui::Layout::right_to_left(
+                                                                egui::Align::Center,
+                                                            ),
+                                                            |ui| {
+                                                                if ui
+                                                                    .add(
+                                                                        egui::Button::new(
+                                                                            egui::RichText::new(
+                                                                                if year_all {
+                                                                                    "全不选"
+                                                                                } else {
+                                                                                    "全选"
+                                                                                },
+                                                                            )
+                                                                            .size(12.0)
+                                                                            .color(ACCENT_DARK),
+                                                                        )
+                                                                        .frame(false),
+                                                                    )
+                                                                    .clicked()
+                                                                {
+                                                                    toggles.borrow_mut().push((
+                                                                        year_days.clone(),
+                                                                        year_all,
+                                                                    ));
+                                                                }
+                                                            },
+                                                        );
+                                                    });
+                                                });
+
+                                            // Month row: mid level, indented.
+                                            for (month, days) in months {
+                                                let month_days: Vec<NaiveDate> = days
+                                                    .iter()
+                                                    .map(|d| {
+                                                        NaiveDate::from_ymd_opt(*year, *month, *d)
+                                                            .unwrap()
+                                                    })
+                                                    .collect();
+                                                let month_all =
+                                                    month_days.iter().all(|d| selected.contains(d));
+                                                ui.add_space(6.0);
+                                                ui.horizontal_wrapped(|ui| {
+                                                    ui.add_space(8.0);
+                                                    if month_chip(
+                                                        ui,
+                                                        &format!("{month} 月"),
+                                                        month_all,
+                                                    )
+                                                    .clicked()
                                                     {
                                                         toggles
                                                             .borrow_mut()
-                                                            .push((year_days.clone(), year_all));
+                                                            .push((month_days.clone(), month_all));
                                                     }
-
-                                                    for (month, days) in months {
-                                                        let month_days: Vec<NaiveDate> = days
-                                                            .iter()
-                                                            .map(|d| {
-                                                                NaiveDate::from_ymd_opt(
-                                                                    *year, *month, *d,
-                                                                )
-                                                                .unwrap()
-                                                            })
-                                                            .collect();
-                                                        let month_all = month_days
-                                                            .iter()
-                                                            .all(|d| selected.contains(d));
-                                                        ui.add_space(4.0);
-                                                        ui.horizontal_wrapped(|ui| {
-                                                            if month_chip(
-                                                                ui,
-                                                                &format!("{month} 月"),
-                                                                month_all,
-                                                            )
+                                                    ui.add_space(6.0);
+                                                    for day in days {
+                                                        let date = NaiveDate::from_ymd_opt(
+                                                            *year, *month, *day,
+                                                        )
+                                                        .unwrap();
+                                                        let sel = selected.contains(&date);
+                                                        if day_chip(ui, &format!("{day}"), sel)
                                                             .clicked()
-                                                            {
-                                                                toggles.borrow_mut().push((
-                                                                    month_days.clone(),
-                                                                    month_all,
-                                                                ));
-                                                            }
-                                                            ui.add_space(2.0);
-                                                            for day in days {
-                                                                let date = NaiveDate::from_ymd_opt(
-                                                                    *year, *month, *day,
-                                                                )
-                                                                .unwrap();
-                                                                let sel = selected.contains(&date);
-                                                                if day_chip(
-                                                                    ui,
-                                                                    &format!("{day}"),
-                                                                    sel,
-                                                                )
-                                                                .clicked()
-                                                                {
-                                                                    toggles
-                                                                        .borrow_mut()
-                                                                        .push((vec![date], sel));
-                                                                }
-                                                            }
-                                                        });
+                                                        {
+                                                            toggles
+                                                                .borrow_mut()
+                                                                .push((vec![date], sel));
+                                                        }
                                                     }
-                                                    ui.add_space(2.0);
-                                                },
-                                            );
+                                                });
+                                            }
                                         }
                                     });
 
