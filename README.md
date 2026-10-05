@@ -125,6 +125,7 @@ tests/
 ## 致谢
 
 * [eframe / egui](https://github.com/emilk/egui) — 窗口界面
+* [egui_extras](https://github.com/emilk/egui/tree/master/crates/egui_extras) — 表格控件
 * [nom-exif](https://github.com/mindeng/nom-exif) — EXIF 解析
 * [sysinfo](https://github.com/GuillaumeGomez/sysinfo) — 挂载点枚举
 * [walkdir](https://github.com/BurntSushi/walkdir) — 目录遍历

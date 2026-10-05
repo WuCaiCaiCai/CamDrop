@@ -6,6 +6,7 @@ use std::thread;
 
 use chrono::{Datelike, NaiveDate};
 use eframe::egui;
+use egui_extras::{Column, TableBuilder};
 
 use camdrop::detector;
 use camdrop::organizer::{self, DateFilter, Event, Options, PreviewItem};
@@ -109,6 +110,14 @@ impl CamDropApp {
         }
     }
 
+    fn filtered_count(&self) -> usize {
+        let filter = self.current_filter();
+        self.preview
+            .iter()
+            .filter(|item| filter.matches(item.date))
+            .count()
+    }
+
     /// Years → months → days present in the scanned files.
     fn available_dates(&self) -> BTreeMap<i32, BTreeMap<u32, BTreeSet<u32>>> {
         let mut tree: BTreeMap<i32, BTreeMap<u32, BTreeSet<u32>>> = BTreeMap::new();
@@ -186,6 +195,30 @@ impl CamDropApp {
         thread::spawn(move || run_migrate(sources, target, opts, tx, ctx));
     }
 
+    fn status_line(&self) -> String {
+        if self.detecting {
+            "正在检测存储卡…".to_owned()
+        } else if self.scanning {
+            "正在扫描，请稍候…".to_owned()
+        } else if self.preview.is_empty() {
+            if self.cards.is_empty() {
+                "未检测到存储卡，请先「选择来源文件夹」。".to_owned()
+            } else {
+                format!(
+                    "已选 {} 个来源，点「扫描所选来源」生成迁移计划。",
+                    self.selected_sources().len()
+                )
+            }
+        } else {
+            let shown = self.filtered_count();
+            format!(
+                "扫描到 {} 个文件，筛选后待迁移 {} 个。",
+                self.preview.len(),
+                shown
+            )
+        }
+    }
+
     fn drain_messages(&mut self) {
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
@@ -207,6 +240,7 @@ impl CamDropApp {
                 }
                 Msg::Scanned(items) => {
                     self.preview = items;
+                    self.selected_days.clear();
                     self.scanning = false;
                     self.progress = (0, 0);
                 }
@@ -255,7 +289,7 @@ fn apply_style(ctx: &egui::Context) {
     let mut style = (*ctx.style_of(theme)).clone();
 
     style.spacing.item_spacing = egui::vec2(9.0, 8.0);
-    style.spacing.button_padding = egui::vec2(14.0, 7.0);
+    style.spacing.button_padding = egui::vec2(14.0, 8.0);
     style.spacing.interact_size.y = 30.0;
     style.text_styles = [
         (
@@ -268,7 +302,7 @@ fn apply_style(ctx: &egui::Context) {
         ),
         (
             egui::TextStyle::Button,
-            egui::FontId::new(14.0, egui::FontFamily::Proportional),
+            egui::FontId::new(14.5, egui::FontFamily::Proportional),
         ),
         (
             egui::TextStyle::Small,
@@ -356,10 +390,15 @@ fn install_cjk_font(ctx: &egui::Context) {
     }
 }
 
-fn section(ui: &mut egui::Ui, text: &str) {
+fn step(ui: &mut egui::Ui, title: &str, hint: &str) {
     ui.add_space(12.0);
-    ui.label(egui::RichText::new(text).size(15.0).strong().color(ACCENT));
+    ui.label(egui::RichText::new(title).size(15.0).strong().color(ACCENT));
+    ui.label(egui::RichText::new(hint).size(11.5).weak());
     ui.add_space(5.0);
+}
+
+fn big_button(text: egui::RichText, fill: egui::Color32) -> egui::Button<'static> {
+    egui::Button::new(text).fill(fill).corner_radius(9.0)
 }
 
 fn file_name(item: &PreviewItem) -> String {
@@ -431,7 +470,7 @@ impl eframe::App for CamDropApp {
         });
 
         egui::Panel::bottom("log")
-            .default_size(120.0)
+            .default_size(110.0)
             .min_size(48.0)
             .max_size(300.0)
             .resizable(true)
@@ -455,8 +494,8 @@ impl eframe::App for CamDropApp {
             });
 
         egui::Panel::left("controls")
-            .default_size(340.0)
-            .min_size(300.0)
+            .default_size(348.0)
+            .min_size(310.0)
             .resizable(true)
             .show(ui, |ui| {
                 egui::ScrollArea::vertical()
@@ -465,12 +504,19 @@ impl eframe::App for CamDropApp {
                     .show(ui, |ui| {
                         let full = ui.available_width();
 
-                        section(ui, "1 · 选择来源");
+                        ui.add_space(8.0);
+                        ui.label(
+                            egui::RichText::new(self.status_line())
+                                .size(12.5)
+                                .color(ACCENT),
+                        );
 
-                        let add =
-                            egui::Button::new(egui::RichText::new("📁  选择来源文件夹").size(15.0))
-                                .min_size(egui::vec2(full, 42.0))
-                                .fill(SURFACE_HI);
+                        step(ui, "1 · 选择来源", "勾选要迁移的存储卡，或手动选择文件夹");
+                        let add = big_button(
+                            egui::RichText::new("📁  选择来源文件夹").size(15.0),
+                            SURFACE_HI,
+                        )
+                        .min_size(egui::vec2(full, 44.0));
                         if ui.add_enabled(!self.busy, add).clicked()
                             && let Some(dir) = rfd::FileDialog::new().pick_folder()
                         {
@@ -482,10 +528,10 @@ impl eframe::App for CamDropApp {
                             self.selected_days.clear();
                         }
 
-                        ui.add_space(4.0);
+                        ui.add_space(6.0);
                         egui::ScrollArea::vertical()
                             .id_salt("cards")
-                            .max_height(110.0)
+                            .max_height(104.0)
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
                                 if self.cards.is_empty() && !self.detecting {
@@ -506,23 +552,23 @@ impl eframe::App for CamDropApp {
                             self.rescan_cards(&ctx);
                         }
 
-                        section(ui, "2 · 扫描");
+                        step(ui, "2 · 扫描", "读取拍摄时间，生成迁移计划");
                         let can_scan = !self.busy
                             && !self.scanning
                             && !self.detecting
                             && !self.cards.is_empty();
-                        let scan = egui::Button::new(
+                        let scan = big_button(
                             egui::RichText::new("🔍  扫描所选来源")
                                 .size(15.0)
                                 .color(ON_ACCENT),
+                            ACCENT,
                         )
-                        .min_size(egui::vec2(full, 38.0))
-                        .fill(ACCENT);
+                        .min_size(egui::vec2(full, 42.0));
                         if ui.add_enabled(can_scan, scan).clicked() {
                             self.scan(&ctx);
                         }
 
-                        section(ui, "3 · 按时间筛选");
+                        step(ui, "3 · 时间筛选", "勾选要迁移的日期，不勾选表示全部");
                         if self.preview.is_empty() {
                             ui.weak("扫描后可在此按时间筛选");
                         } else {
@@ -624,47 +670,40 @@ impl eframe::App for CamDropApp {
                             }
                         }
 
-                        section(ui, "4 · 迁移");
-                        ui.label("目标目录");
-                        ui.horizontal(|ui| {
-                            ui.add(
-                                egui::TextEdit::singleline(&mut self.target)
-                                    .desired_width(full - 74.0),
-                            );
-                            if ui.button("浏览…").clicked()
-                                && let Some(dir) = rfd::FileDialog::new().pick_folder()
-                            {
-                                self.target = dir.display().to_string();
-                            }
-                        });
-
-                        ui.add_space(2.0);
+                        step(ui, "4 · 执行迁移", "选择目标目录与方式，然后开始");
                         ui.label("方式");
                         ui.horizontal(|ui| {
                             ui.radio_value(&mut self.copy_only, false, "移动（删除源文件）");
                             ui.radio_value(&mut self.copy_only, true, "复制（保留源文件）");
                         });
 
-                        ui.add_space(8.0);
-                        let filter = self.current_filter();
-                        let shown_count = self
-                            .preview
-                            .iter()
-                            .filter(|item| filter.matches(item.date))
-                            .count();
+                        ui.add_space(6.0);
+                        ui.label("目标目录");
+                        let pick = big_button(
+                            egui::RichText::new("📂  选择目标文件夹").size(15.0),
+                            SURFACE_HI,
+                        )
+                        .min_size(egui::vec2(full, 42.0));
+                        if ui.add_enabled(!self.busy, pick).clicked()
+                            && let Some(dir) = rfd::FileDialog::new().pick_folder()
+                        {
+                            self.target = dir.display().to_string();
+                        }
+                        ui.label(egui::RichText::new(&self.target).size(11.5).weak());
+
+                        ui.add_space(10.0);
                         let can_migrate = !self.busy
                             && !self.scanning
                             && !self.cards.is_empty()
-                            && shown_count > 0;
-
-                        let migrate = egui::Button::new(
+                            && self.filtered_count() > 0;
+                        let migrate = big_button(
                             egui::RichText::new("▶  开始迁移")
                                 .size(17.0)
                                 .strong()
                                 .color(ON_ACCENT),
+                            ACCENT,
                         )
-                        .min_size(egui::vec2(full, 44.0))
-                        .fill(ACCENT);
+                        .min_size(egui::vec2(full, 46.0));
                         if ui.add_enabled(can_migrate, migrate).clicked() {
                             self.migrate(&ctx);
                         }
@@ -672,17 +711,13 @@ impl eframe::App for CamDropApp {
                             ui.add_space(4.0);
                             ui.label(egui::RichText::new(summary.as_str()).color(ACCENT));
                         }
-                        ui.add_space(10.0);
+                        ui.add_space(12.0);
                     });
             });
 
         egui::CentralPanel::default().show(ui, |ui| {
             let filter = self.current_filter();
-            let shown_len = self
-                .preview
-                .iter()
-                .filter(|item| filter.matches(item.date))
-                .count();
+            let shown_len = self.filtered_count();
             let total_size: u64 = self
                 .preview
                 .iter()
@@ -718,14 +753,18 @@ impl eframe::App for CamDropApp {
             ui.separator();
 
             if shown_len == 0 {
-                ui.add_space(24.0);
-                if self.scanning {
-                    ui.weak("正在扫描…");
-                } else if self.preview.is_empty() {
-                    ui.weak("在左侧选择来源，然后点击「扫描所选来源」查看迁移计划。");
-                } else {
-                    ui.weak("当前筛选条件下没有文件。");
-                }
+                ui.add_space(28.0);
+                ui.vertical_centered(|ui| {
+                    if self.scanning {
+                        ui.weak("正在扫描…");
+                    } else if self.preview.is_empty() {
+                        ui.weak("① 选择来源  →  ② 扫描  →  ③ 筛选  →  ④ 迁移");
+                        ui.add_space(6.0);
+                        ui.weak("在左侧选择来源，然后点击「扫描所选来源」。");
+                    } else {
+                        ui.weak("当前筛选条件下没有文件。");
+                    }
+                });
                 return;
             }
 
@@ -737,33 +776,50 @@ impl eframe::App for CamDropApp {
 
             match self.view {
                 ViewMode::Files => {
-                    egui::ScrollArea::both()
-                        .id_salt("preview_files")
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            egui::Grid::new("preview_grid")
-                                .num_columns(5)
-                                .striped(true)
-                                .spacing([18.0, 6.0])
-                                .show(ui, |ui| {
-                                    ui.strong("文件名");
-                                    ui.strong("大小");
-                                    ui.strong("拍摄时间");
-                                    ui.strong("迁移到");
-                                    ui.strong("XMP");
-                                    ui.end_row();
-
-                                    for item in &shown {
-                                        ui.label(file_name(item));
-                                        ui.label(human_size(item.size));
-                                        ui.label(&item.captured);
-                                        ui.label(
-                                            egui::RichText::new(target_path(item)).color(ACCENT),
-                                        );
-                                        ui.label(if item.has_xmp { "有" } else { "—" });
-                                        ui.end_row();
-                                    }
+                    TableBuilder::new(ui)
+                        .striped(true)
+                        .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                        .column(Column::initial(220.0).at_least(120.0).resizable(true))
+                        .column(Column::initial(80.0).at_least(60.0))
+                        .column(Column::initial(170.0).at_least(140.0))
+                        .column(Column::remainder().at_least(180.0))
+                        .column(Column::initial(52.0).at_least(44.0))
+                        .header(26.0, |mut header| {
+                            header.col(|ui| {
+                                ui.strong("文件名");
+                            });
+                            header.col(|ui| {
+                                ui.strong("大小");
+                            });
+                            header.col(|ui| {
+                                ui.strong("拍摄时间");
+                            });
+                            header.col(|ui| {
+                                ui.strong("迁移到");
+                            });
+                            header.col(|ui| {
+                                ui.strong("XMP");
+                            });
+                        })
+                        .body(|body| {
+                            body.rows(23.0, shown.len(), |mut row| {
+                                let item = shown[row.index()];
+                                row.col(|ui| {
+                                    ui.label(file_name(item));
                                 });
+                                row.col(|ui| {
+                                    ui.label(human_size(item.size));
+                                });
+                                row.col(|ui| {
+                                    ui.label(&item.captured);
+                                });
+                                row.col(|ui| {
+                                    ui.label(egui::RichText::new(target_path(item)).color(ACCENT));
+                                });
+                                row.col(|ui| {
+                                    ui.label(if item.has_xmp { "有" } else { "—" });
+                                });
+                            });
                         });
                 }
                 ViewMode::Tree => {

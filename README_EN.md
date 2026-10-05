@@ -125,6 +125,7 @@ tests/
 ## Credits
 
 * [eframe / egui](https://github.com/emilk/egui) — window and UI
+* [egui_extras](https://github.com/emilk/egui/tree/master/crates/egui_extras) — table widget
 * [nom-exif](https://github.com/mindeng/nom-exif) — EXIF parsing
 * [sysinfo](https://github.com/GuillaumeGomez/sysinfo) — mount enumeration
 * [walkdir](https://github.com/BurntSushi/walkdir) — directory traversal

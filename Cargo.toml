@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 chrono = "0.4.45"
 eframe = { version = "0.35.0", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+egui_extras = { version = "0.35.0", default-features = false }
 nom-exif = "3.8.0"
 rfd = "0.17.2"
 sysinfo = "0.38.4"
