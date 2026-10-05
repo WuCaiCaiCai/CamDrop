@@ -58,6 +58,8 @@ pub struct Summary {
 pub enum Event {
     Log(String),
     Progress(usize, usize),
+    /// A source file was successfully migrated (or copied).
+    Processed(PathBuf),
 }
 
 /// Collects supported media files under `root`.
@@ -273,6 +275,8 @@ pub fn organize(
                         summary.xmp += 1;
                     }
                 }
+
+                on_event(Event::Processed(file.clone()));
             }
             Err(e) => {
                 summary.errors += 1;

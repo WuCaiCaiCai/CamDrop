@@ -11,16 +11,20 @@ use egui_extras::{Column, TableBuilder};
 use camdrop::detector;
 use camdrop::organizer::{self, DateFilter, Event, Options, PreviewItem};
 
-const ACCENT: egui::Color32 = egui::Color32::from_rgb(54, 170, 208);
-const ACCENT_STRONG: egui::Color32 = egui::Color32::from_rgb(34, 132, 168);
-const ON_ACCENT: egui::Color32 = egui::Color32::from_rgb(8, 20, 27);
-const BG: egui::Color32 = egui::Color32::from_rgb(17, 21, 27);
-const SURFACE: egui::Color32 = egui::Color32::from_rgb(26, 32, 40);
-const SURFACE_HI: egui::Color32 = egui::Color32::from_rgb(38, 47, 59);
+const ACCENT: egui::Color32 = egui::Color32::from_rgb(42, 166, 208);
+const ACCENT_DARK: egui::Color32 = egui::Color32::from_rgb(28, 128, 168);
+const ON_ACCENT: egui::Color32 = egui::Color32::from_rgb(255, 255, 255);
+const BG: egui::Color32 = egui::Color32::from_rgb(245, 247, 250);
+const SURFACE: egui::Color32 = egui::Color32::from_rgb(255, 255, 255);
+const SURFACE_HI: egui::Color32 = egui::Color32::from_rgb(233, 238, 244);
+const TEXT: egui::Color32 = egui::Color32::from_rgb(31, 41, 51);
+const TEXT_WEAK: egui::Color32 = egui::Color32::from_rgb(100, 116, 139);
+const BORDER: egui::Color32 = egui::Color32::from_rgb(226, 232, 240);
 
 enum Msg {
     Cards(Vec<PathBuf>),
     Scanned(Vec<PreviewItem>),
+    Processed(PathBuf),
     Log(String),
     Progress(usize, usize),
     Done(String),
@@ -30,6 +34,14 @@ enum Msg {
 enum ViewMode {
     Files,
     Tree,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Step {
+    Source,
+    Scan,
+    Filter,
+    Migrate,
 }
 
 struct Card {
@@ -44,6 +56,7 @@ pub struct CamDropApp {
     preview: Vec<PreviewItem>,
     selected_days: BTreeSet<NaiveDate>,
     view: ViewMode,
+    step: Step,
     target: String,
     copy_only: bool,
     detecting: bool,
@@ -52,6 +65,7 @@ pub struct CamDropApp {
     progress: (usize, usize),
     progress_label: String,
     summary: Option<String>,
+    dialog: Option<Vec<String>>,
     log: Vec<String>,
 }
 
@@ -82,6 +96,7 @@ impl CamDropApp {
             preview: Vec::new(),
             selected_days: BTreeSet::new(),
             view: ViewMode::Files,
+            step: Step::Source,
             target,
             copy_only: false,
             detecting: true,
@@ -90,6 +105,7 @@ impl CamDropApp {
             progress: (0, 0),
             progress_label: String::new(),
             summary: None,
+            dialog: None,
             log: Vec::new(),
         }
     }
@@ -118,6 +134,18 @@ impl CamDropApp {
             .count()
     }
 
+    fn scan_available(&self) -> bool {
+        !self.cards.is_empty()
+    }
+
+    fn filter_available(&self) -> bool {
+        !self.preview.is_empty()
+    }
+
+    fn migrate_available(&self) -> bool {
+        self.busy || !self.preview.is_empty() || self.summary.is_some()
+    }
+
     /// Years → months → days present in the scanned files.
     fn available_dates(&self) -> BTreeMap<i32, BTreeMap<u32, BTreeSet<u32>>> {
         let mut tree: BTreeMap<i32, BTreeMap<u32, BTreeSet<u32>>> = BTreeMap::new();
@@ -132,6 +160,41 @@ impl CamDropApp {
                 .insert(date.day());
         }
         tree
+    }
+
+    fn clamp_step(&mut self) {
+        if self.busy || self.scanning {
+            return;
+        }
+        if self.step == Step::Migrate && !self.migrate_available() {
+            self.step = Step::Filter;
+        }
+        if self.step == Step::Filter && !self.filter_available() {
+            self.step = if self.scan_available() {
+                Step::Scan
+            } else {
+                Step::Source
+            };
+        }
+        if self.step == Step::Scan && !self.scan_available() {
+            self.step = Step::Source;
+        }
+    }
+
+    fn validate(&self) -> Vec<String> {
+        let mut problems = Vec::new();
+        if self.selected_sources().is_empty() {
+            problems.push("还没有选择来源，请在「选择来源」里点选存储卡。".to_owned());
+        }
+        if self.preview.is_empty() {
+            problems.push("还没有扫描，请先在「扫描」里点「扫描所选来源」。".to_owned());
+        } else if self.filtered_count() == 0 {
+            problems.push("当前时间筛选下没有文件，请调整筛选或「清除筛选」。".to_owned());
+        }
+        if self.target.trim().is_empty() {
+            problems.push("还没有选择目标目录，请在「迁移设置」里选择。".to_owned());
+        }
+        problems
     }
 
     fn rescan_cards(&mut self, ctx: &egui::Context) {
@@ -171,13 +234,17 @@ impl CamDropApp {
         });
     }
 
+    fn try_migrate(&mut self, ctx: &egui::Context) {
+        let problems = self.validate();
+        if problems.is_empty() {
+            self.migrate(ctx);
+        } else {
+            self.dialog = Some(problems);
+        }
+    }
+
     fn migrate(&mut self, ctx: &egui::Context) {
         let sources = self.selected_sources();
-        if sources.is_empty() {
-            self.log.push("请先选择来源".to_owned());
-            return;
-        }
-
         let target = PathBuf::from(self.target.clone());
         let opts = Options {
             copy_only: self.copy_only,
@@ -202,7 +269,7 @@ impl CamDropApp {
             "正在扫描，请稍候…".to_owned()
         } else if self.preview.is_empty() {
             if self.cards.is_empty() {
-                "未检测到存储卡，请先「选择来源文件夹」。".to_owned()
+                "未检测到存储卡，请点「手动选择」选择文件夹。".to_owned()
             } else {
                 format!(
                     "已选 {} 个来源，点「扫描所选来源」生成迁移计划。",
@@ -210,11 +277,10 @@ impl CamDropApp {
                 )
             }
         } else {
-            let shown = self.filtered_count();
             format!(
                 "扫描到 {} 个文件，筛选后待迁移 {} 个。",
                 self.preview.len(),
-                shown
+                self.filtered_count()
             )
         }
     }
@@ -233,9 +299,12 @@ impl CamDropApp {
                     self.detecting = false;
                     self.preview.clear();
                     self.selected_days.clear();
+                    if !self.cards.is_empty() && self.step == Step::Source {
+                        self.step = Step::Scan;
+                    }
                     if self.cards.is_empty() {
                         self.log
-                            .push("未检测到存储卡，点击「选择来源文件夹」手动选择".to_owned());
+                            .push("未检测到存储卡，点击「手动选择」选择文件夹".to_owned());
                     }
                 }
                 Msg::Scanned(items) => {
@@ -243,6 +312,10 @@ impl CamDropApp {
                     self.selected_days.clear();
                     self.scanning = false;
                     self.progress = (0, 0);
+                    self.step = Step::Filter;
+                }
+                Msg::Processed(path) => {
+                    self.preview.retain(|item| item.source != path);
                 }
                 Msg::Log(line) => self.log.push(line),
                 Msg::Progress(done, total) => self.progress = (done, total),
@@ -270,6 +343,7 @@ fn run_migrate(
         let msg = match event {
             Event::Log(line) => Msg::Log(line),
             Event::Progress(done, total) => Msg::Progress(done, total),
+            Event::Processed(path) => Msg::Processed(path),
         };
         let _ = tx.send(msg);
         event_ctx.request_repaint();
@@ -284,8 +358,8 @@ fn run_migrate(
 }
 
 fn apply_style(ctx: &egui::Context) {
-    ctx.set_theme(egui::ThemePreference::Dark);
-    let theme = egui::Theme::Dark;
+    ctx.set_theme(egui::ThemePreference::Light);
+    let theme = egui::Theme::Light;
     let mut style = (*ctx.style_of(theme)).clone();
 
     style.spacing.item_spacing = egui::vec2(9.0, 8.0);
@@ -315,17 +389,18 @@ fn apply_style(ctx: &egui::Context) {
     ]
     .into();
 
-    let mut visuals = egui::Visuals::dark();
+    let mut visuals = egui::Visuals::light();
     visuals.panel_fill = BG;
     visuals.window_fill = SURFACE;
-    visuals.extreme_bg_color = egui::Color32::from_rgb(12, 16, 21);
-    visuals.faint_bg_color = SURFACE;
-    visuals.code_bg_color = SURFACE;
-    visuals.hyperlink_color = ACCENT;
+    visuals.extreme_bg_color = egui::Color32::from_rgb(255, 255, 255);
+    visuals.faint_bg_color = egui::Color32::from_rgb(240, 244, 248);
+    visuals.code_bg_color = SURFACE_HI;
+    visuals.hyperlink_color = ACCENT_DARK;
     visuals.selection.bg_fill = ACCENT;
     visuals.selection.stroke = egui::Stroke::new(1.0, ON_ACCENT);
     visuals.window_corner_radius = egui::CornerRadius::same(12);
     visuals.menu_corner_radius = egui::CornerRadius::same(9);
+    visuals.override_text_color = Some(TEXT);
 
     for widget in [
         &mut visuals.widgets.noninteractive,
@@ -335,12 +410,18 @@ fn apply_style(ctx: &egui::Context) {
         &mut visuals.widgets.open,
     ] {
         widget.corner_radius = egui::CornerRadius::same(8);
+        widget.bg_stroke = egui::Stroke::new(1.0, BORDER);
+        widget.fg_stroke = egui::Stroke::new(1.0, TEXT);
     }
     visuals.widgets.inactive.weak_bg_fill = SURFACE_HI;
     visuals.widgets.inactive.bg_fill = SURFACE_HI;
-    visuals.widgets.hovered.weak_bg_fill = ACCENT_STRONG;
+    visuals.widgets.hovered.weak_bg_fill = egui::Color32::from_rgb(214, 230, 240);
     visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, ACCENT);
-    visuals.widgets.active.weak_bg_fill = ACCENT_STRONG;
+    visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, TEXT);
+    visuals.widgets.active.weak_bg_fill = ACCENT;
+    visuals.widgets.active.bg_fill = ACCENT;
+    visuals.widgets.active.fg_stroke = egui::Stroke::new(1.0, ON_ACCENT);
+    visuals.widgets.open.fg_stroke = egui::Stroke::new(1.0, TEXT);
 
     style.visuals = visuals;
     ctx.set_style_of(theme, style);
@@ -390,15 +471,6 @@ fn install_cjk_font(ctx: &egui::Context) {
     }
 }
 
-fn step(ui: &mut egui::Ui, title: &str, hint: &str) {
-    ui.add_space(6.0);
-    ui.separator();
-    ui.add_space(8.0);
-    ui.label(egui::RichText::new(title).size(14.5).strong().color(ACCENT));
-    ui.label(egui::RichText::new(hint).size(11.5).weak());
-    ui.add_space(6.0);
-}
-
 /// A hand-drawn full-width button with clear hover and press feedback.
 fn action_button(
     ui: &mut egui::Ui,
@@ -418,14 +490,17 @@ fn action_button(
 
     let hovering = enabled && response.hovered();
     let pressing = enabled && response.is_pointer_button_down_on();
-    let color = if !enabled {
-        fill.gamma_multiply(0.4)
+    let (color, text) = if !enabled {
+        (
+            egui::Color32::from_rgb(236, 240, 244),
+            egui::Color32::from_rgb(160, 168, 178),
+        )
     } else if pressing {
-        fill.gamma_multiply(0.72)
+        (fill.gamma_multiply(0.85), text_color)
     } else if hovering {
-        fill.gamma_multiply(1.2)
+        (fill.gamma_multiply(0.94), text_color)
     } else {
-        fill
+        (fill, text_color)
     };
 
     let radius = egui::CornerRadius::same(10);
@@ -435,7 +510,7 @@ fn action_button(
         painter.rect_stroke(
             rect,
             radius,
-            egui::Stroke::new(1.5, egui::Color32::from_white_alpha(90)),
+            egui::Stroke::new(1.5, ACCENT.gamma_multiply(0.7)),
             egui::StrokeKind::Inside,
         );
     }
@@ -444,11 +519,7 @@ fn action_button(
         egui::Align2::CENTER_CENTER,
         label,
         egui::FontId::proportional(16.0),
-        if enabled {
-            text_color
-        } else {
-            text_color.gamma_multiply(0.5)
-        },
+        text,
     );
 
     if hovering {
@@ -457,16 +528,40 @@ fn action_button(
     response
 }
 
+fn step_header(ui: &mut egui::Ui, title: &str, active: bool, available: bool) -> egui::Response {
+    let (fill, text) = if active {
+        (ACCENT, ON_ACCENT)
+    } else if available {
+        (SURFACE_HI, TEXT)
+    } else {
+        (SURFACE, TEXT_WEAK)
+    };
+    let label = if active {
+        format!("▾  {title}")
+    } else {
+        format!("▸  {title}")
+    };
+    action_button(ui, &label, fill, text, 38.0, available)
+}
+
 /// A full-width toggle button for a detected card, filled with the accent when
 /// selected.
 fn toggle_button(ui: &mut egui::Ui, label: &str, selected: bool, height: f32) -> egui::Response {
     let fill = if selected { ACCENT } else { SURFACE_HI };
-    let text = if selected {
-        ON_ACCENT
-    } else {
-        egui::Color32::from_gray(214)
-    };
+    let text = if selected { ON_ACCENT } else { TEXT };
     action_button(ui, label, fill, text, height, true)
+}
+
+/// A small chip that highlights when selected.
+fn chip_button(ui: &mut egui::Ui, text: &str, selected: bool) -> egui::Response {
+    let fill = if selected { ACCENT } else { SURFACE_HI };
+    let color = if selected { ON_ACCENT } else { TEXT };
+    ui.add(
+        egui::Button::new(egui::RichText::new(text).size(13.0).color(color))
+            .fill(fill)
+            .corner_radius(7.0)
+            .small(),
+    )
 }
 
 fn file_name(item: &PreviewItem) -> String {
@@ -499,6 +594,7 @@ impl eframe::App for CamDropApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.drain_messages();
+        self.clamp_step();
 
         egui::Panel::top("header").show(ui, |ui| {
             ui.add_space(8.0);
@@ -507,10 +603,36 @@ impl eframe::App for CamDropApp {
                     egui::RichText::new("CamDrop")
                         .size(23.0)
                         .strong()
-                        .color(ACCENT),
+                        .color(ACCENT_DARK),
                 );
                 ui.add_space(8.0);
                 ui.weak("相机存储卡按日期迁移");
+            });
+            ui.add_space(6.0);
+            ui.label(
+                egui::RichText::new(self.status_line())
+                    .size(12.5)
+                    .color(ACCENT_DARK),
+            );
+            ui.add_space(8.0);
+        });
+
+        // Bottom status bar: result + progress, pinned to the very bottom.
+        egui::Panel::bottom("status").show(ui, |ui| {
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                let left = if self.busy || self.scanning {
+                    self.progress_label.clone()
+                } else if let Some(summary) = &self.summary {
+                    summary.clone()
+                } else {
+                    String::new()
+                };
+                if left.is_empty() {
+                    ui.weak("就绪");
+                } else {
+                    ui.label(egui::RichText::new(left).strong().color(ACCENT_DARK));
+                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if self.detecting || self.scanning || self.busy {
                         ui.spinner();
@@ -520,38 +642,25 @@ impl eframe::App for CamDropApp {
                         let fraction = done as f32 / total as f32;
                         ui.add(
                             egui::ProgressBar::new(fraction)
-                                .desired_width(200.0)
+                                .desired_width(220.0)
                                 .fill(ACCENT),
                         );
                         ui.weak(format!("{done}/{total}"));
                     }
-                    if (self.scanning || self.busy) && !self.progress_label.is_empty() {
-                        ui.label(
-                            egui::RichText::new(self.progress_label.as_str())
-                                .strong()
-                                .color(ACCENT),
-                        );
-                    }
                 });
             });
-            ui.add_space(6.0);
-            ui.label(
-                egui::RichText::new(self.status_line())
-                    .size(12.5)
-                    .color(ACCENT),
-            );
-            ui.add_space(8.0);
+            ui.add_space(4.0);
         });
 
         egui::Panel::bottom("log")
-            .default_size(104.0)
-            .min_size(48.0)
+            .default_size(96.0)
+            .min_size(40.0)
             .max_size(300.0)
             .resizable(true)
             .show(ui, |ui| {
                 ui.add_space(2.0);
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("日志").strong().color(ACCENT));
+                    ui.label(egui::RichText::new("日志").strong().color(ACCENT_DARK));
                     if !self.log.is_empty() && ui.small_button("清空").clicked() {
                         self.log.clear();
                     }
@@ -568,25 +677,16 @@ impl eframe::App for CamDropApp {
             });
 
         egui::Panel::left("controls")
-            .default_size(352.0)
-            .min_size(310.0)
+            .default_size(360.0)
+            .min_size(320.0)
             .resizable(true)
             .show(ui, |ui| {
-                // Primary action pinned to the bottom of the panel.
                 egui::Panel::bottom("migrate_bar").show(ui, |ui| {
                     ui.add_space(8.0);
-                    if let Some(summary) = &self.summary {
-                        ui.label(egui::RichText::new(summary.as_str()).color(ACCENT));
-                        ui.add_space(4.0);
-                    }
-                    let can_migrate = !self.busy
-                        && !self.scanning
-                        && !self.cards.is_empty()
-                        && self.filtered_count() > 0;
-                    if action_button(ui, "▶  开始迁移", ACCENT, ON_ACCENT, 52.0, can_migrate)
+                    if action_button(ui, "▶  开始迁移", ACCENT, ON_ACCENT, 52.0, !self.busy)
                         .clicked()
                     {
-                        self.migrate(&ctx);
+                        self.try_migrate(&ctx);
                     }
                     ui.add_space(8.0);
                 });
@@ -596,201 +696,250 @@ impl eframe::App for CamDropApp {
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         ui.add_space(8.0);
-                        step(ui, "1 · 选择来源", "点击检测到的存储卡加入迁移，可多选");
-                        egui::ScrollArea::vertical()
-                            .id_salt("cards")
-                            .max_height(170.0)
-                            .auto_shrink([false, false])
-                            .show(ui, |ui| {
-                                if self.cards.is_empty() && !self.detecting {
-                                    ui.weak("未检测到存储卡");
-                                }
-                                for card in &mut self.cards {
-                                    let label = format!(
-                                        "{}  {}",
-                                        if card.selected { "●" } else { "○" },
-                                        card.path.display()
-                                    );
-                                    if toggle_button(ui, &label, card.selected, 44.0).clicked() {
-                                        card.selected = !card.selected;
+
+                        // Step 1 · source
+                        if step_header(ui, "1 · 选择来源", self.step == Step::Source, true)
+                            .clicked()
+                            && self.step != Step::Source
+                        {
+                            self.step = Step::Source;
+                        }
+                        if self.step == Step::Source {
+                            ui.add_space(6.0);
+                            egui::ScrollArea::vertical()
+                                .id_salt("cards")
+                                .max_height(168.0)
+                                .auto_shrink([false, false])
+                                .show(ui, |ui| {
+                                    if self.cards.is_empty() && !self.detecting {
+                                        ui.weak("未检测到存储卡");
                                     }
+                                    for card in &mut self.cards {
+                                        let label = format!(
+                                            "{}  {}",
+                                            if card.selected { "●" } else { "○" },
+                                            card.path.display()
+                                        );
+                                        if toggle_button(ui, &label, card.selected, 42.0).clicked()
+                                        {
+                                            card.selected = !card.selected;
+                                        }
+                                    }
+                                });
+                            ui.add_space(6.0);
+                            ui.horizontal(|ui| {
+                                if ui
+                                    .add_enabled(!self.busy, egui::Button::new("📁  手动选择…"))
+                                    .clicked()
+                                    && let Some(dir) = rfd::FileDialog::new().pick_folder()
+                                {
+                                    self.cards.push(Card {
+                                        path: dir,
+                                        selected: true,
+                                    });
+                                    self.preview.clear();
+                                    self.selected_days.clear();
+                                }
+                                if ui
+                                    .add_enabled(!self.busy, egui::Button::new("🔄  重新检测"))
+                                    .clicked()
+                                {
+                                    self.rescan_cards(&ctx);
                                 }
                             });
-
-                        ui.add_space(6.0);
-                        if ui
-                            .add_enabled(!self.busy, egui::Button::new("📁  手动选择文件夹…"))
-                            .clicked()
-                            && let Some(dir) = rfd::FileDialog::new().pick_folder()
-                        {
-                            self.cards.push(Card {
-                                path: dir,
-                                selected: true,
-                            });
-                            self.preview.clear();
-                            self.selected_days.clear();
+                            ui.add_space(8.0);
+                            let can = !self.busy && !self.cards.is_empty();
+                            if action_button(ui, "继续", SURFACE_HI, TEXT, 40.0, can).clicked() {
+                                self.step = Step::Scan;
+                            }
+                            ui.add_space(8.0);
                         }
 
-                        if ui
-                            .add_enabled(!self.busy, egui::Button::new("🔄  重新检测存储卡"))
-                            .clicked()
+                        // Step 2 · scan
+                        if step_header(
+                            ui,
+                            "2 · 扫描",
+                            self.step == Step::Scan,
+                            self.scan_available(),
+                        )
+                        .clicked()
+                            && self.step != Step::Scan
                         {
-                            self.rescan_cards(&ctx);
+                            self.step = Step::Scan;
+                        }
+                        if self.step == Step::Scan {
+                            ui.add_space(6.0);
+                            let can = !self.busy
+                                && !self.scanning
+                                && !self.detecting
+                                && !self.cards.is_empty();
+                            if action_button(ui, "🔍  扫描所选来源", ACCENT, ON_ACCENT, 46.0, can)
+                                .clicked()
+                            {
+                                self.scan(&ctx);
+                            }
+                            ui.add_space(8.0);
                         }
 
-                        step(ui, "2 · 扫描", "读取拍摄时间，生成迁移计划");
-                        let can_scan = !self.busy
-                            && !self.scanning
-                            && !self.detecting
-                            && !self.cards.is_empty();
-                        if action_button(ui, "🔍  扫描所选来源", SURFACE_HI, ACCENT, 46.0, can_scan)
-                            .clicked()
+                        // Step 3 · date filter
+                        if step_header(
+                            ui,
+                            "3 · 时间筛选",
+                            self.step == Step::Filter,
+                            self.filter_available(),
+                        )
+                        .clicked()
+                            && self.step != Step::Filter
                         {
-                            self.scan(&ctx);
+                            self.step = Step::Filter;
                         }
+                        if self.step == Step::Filter {
+                            ui.add_space(6.0);
+                            if self.preview.is_empty() {
+                                ui.weak("扫描后可在此按时间筛选");
+                            } else {
+                                let tree = self.available_dates();
+                                let selected = self.selected_days.clone();
+                                let toggles: RefCell<Vec<(Vec<NaiveDate>, bool)>> =
+                                    RefCell::new(Vec::new());
 
-                        // Step 3: collapsible date filter.
-                        ui.add_space(6.0);
-                        ui.separator();
-                        ui.add_space(8.0);
-                        if self.preview.is_empty() {
-                            ui.label(
-                                egui::RichText::new("3 · 时间筛选")
-                                    .size(14.5)
-                                    .strong()
-                                    .color(ACCENT),
-                            );
-                            ui.label(
-                                egui::RichText::new("扫描后可在此按时间筛选")
-                                    .size(11.5)
-                                    .weak(),
-                            );
-                        } else {
-                            let tree = self.available_dates();
-                            let selected = self.selected_days.clone();
-                            let toggles: RefCell<Vec<(Vec<NaiveDate>, bool)>> =
-                                RefCell::new(Vec::new());
-
-                            egui::CollapsingHeader::new(
-                                egui::RichText::new(format!(
-                                    "3 · 时间筛选（已选 {} 天）",
-                                    self.selected_days.len()
-                                ))
-                                .size(14.5)
-                                .strong()
-                                .color(ACCENT),
-                            )
-                            .id_salt("filter_header")
-                            .default_open(false)
-                            .show(ui, |ui| {
-                                ui.add_space(4.0);
                                 for (year, months) in &tree {
-                                    let year_days: Vec<NaiveDate> = months
-                                        .iter()
-                                        .flat_map(|(m, days)| {
-                                            days.iter().map(move |d| {
-                                                NaiveDate::from_ymd_opt(*year, *m, *d).unwrap()
-                                            })
-                                        })
-                                        .collect();
-                                    let year_all = year_days.iter().all(|d| selected.contains(d));
-                                    let mut check = year_all;
-                                    if ui
-                                        .checkbox(
-                                            &mut check,
-                                            egui::RichText::new(format!("{year} 年")).strong(),
-                                        )
-                                        .changed()
-                                    {
-                                        toggles.borrow_mut().push((year_days, year_all));
-                                    }
-
-                                    for (month, days) in months {
-                                        let month_days: Vec<NaiveDate> = days
+                                    egui::CollapsingHeader::new(
+                                        egui::RichText::new(format!("{year} 年"))
+                                            .strong()
+                                            .color(ACCENT_DARK),
+                                    )
+                                    .id_salt(("year", *year))
+                                    .default_open(true)
+                                    .show(ui, |ui| {
+                                        let year_days: Vec<NaiveDate> = months
                                             .iter()
-                                            .map(|d| {
-                                                NaiveDate::from_ymd_opt(*year, *month, *d).unwrap()
+                                            .flat_map(|(m, days)| {
+                                                days.iter().map(move |d| {
+                                                    NaiveDate::from_ymd_opt(*year, *m, *d).unwrap()
+                                                })
                                             })
                                             .collect();
-                                        let month_all =
-                                            month_days.iter().all(|d| selected.contains(d));
-                                        ui.horizontal(|ui| {
-                                            ui.add_space(18.0);
-                                            let mut check = month_all;
-                                            if ui
-                                                .checkbox(&mut check, format!("{month:02} 月"))
-                                                .changed()
-                                            {
-                                                toggles
-                                                    .borrow_mut()
-                                                    .push((month_days.clone(), month_all));
-                                            }
-                                        });
-
-                                        for day in days {
-                                            let date = NaiveDate::from_ymd_opt(*year, *month, *day)
-                                                .unwrap();
-                                            let was_selected = selected.contains(&date);
-                                            let mut check = was_selected;
-                                            ui.horizontal(|ui| {
-                                                ui.add_space(38.0);
-                                                if ui
-                                                    .checkbox(&mut check, format!("{day:02} 日"))
-                                                    .changed()
+                                        let year_all =
+                                            year_days.iter().all(|d| selected.contains(d));
+                                        if chip_button(ui, "全年", year_all).clicked() {
+                                            toggles
+                                                .borrow_mut()
+                                                .push((year_days.clone(), year_all));
+                                        }
+                                        for (month, days) in months {
+                                            let month_days: Vec<NaiveDate> = days
+                                                .iter()
+                                                .map(|d| {
+                                                    NaiveDate::from_ymd_opt(*year, *month, *d)
+                                                        .unwrap()
+                                                })
+                                                .collect();
+                                            let month_all =
+                                                month_days.iter().all(|d| selected.contains(d));
+                                            ui.horizontal_wrapped(|ui| {
+                                                if chip_button(
+                                                    ui,
+                                                    &format!("{month:02} 月"),
+                                                    month_all,
+                                                )
+                                                .clicked()
                                                 {
                                                     toggles
                                                         .borrow_mut()
-                                                        .push((vec![date], was_selected));
+                                                        .push((month_days.clone(), month_all));
+                                                }
+                                                for day in days {
+                                                    let date = NaiveDate::from_ymd_opt(
+                                                        *year, *month, *day,
+                                                    )
+                                                    .unwrap();
+                                                    let sel = selected.contains(&date);
+                                                    if chip_button(ui, &format!("{day:02}"), sel)
+                                                        .clicked()
+                                                    {
+                                                        toggles
+                                                            .borrow_mut()
+                                                            .push((vec![date], sel));
+                                                    }
                                                 }
                                             });
                                         }
+                                    });
+                                }
+
+                                for (days, was_all) in toggles.into_inner() {
+                                    if was_all {
+                                        for day in &days {
+                                            self.selected_days.remove(day);
+                                        }
+                                    } else {
+                                        for day in &days {
+                                            self.selected_days.insert(*day);
+                                        }
                                     }
                                 }
-                            });
 
-                            for (days, was_all) in toggles.into_inner() {
-                                if was_all {
-                                    for day in &days {
-                                        self.selected_days.remove(day);
-                                    }
-                                } else {
-                                    for day in &days {
-                                        self.selected_days.insert(*day);
-                                    }
+                                ui.add_space(4.0);
+                                if !self.selected_days.is_empty() {
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            egui::RichText::new(format!(
+                                                "已选 {} 天",
+                                                self.selected_days.len()
+                                            ))
+                                            .color(ACCENT_DARK),
+                                        );
+                                        if ui.small_button("清除筛选").clicked() {
+                                            self.selected_days.clear();
+                                        }
+                                    });
                                 }
                             }
-
-                            if !self.selected_days.is_empty()
-                                && ui.small_button("清除筛选").clicked()
-                            {
-                                self.selected_days.clear();
+                            ui.add_space(8.0);
+                            if action_button(ui, "继续", SURFACE_HI, TEXT, 40.0, true).clicked() {
+                                self.step = Step::Migrate;
                             }
+                            ui.add_space(8.0);
                         }
 
-                        step(ui, "4 · 迁移设置", "选择方式与目标目录");
-                        ui.label("方式");
-                        ui.horizontal(|ui| {
-                            ui.radio_value(&mut self.copy_only, false, "移动（删除源文件）");
-                            ui.radio_value(&mut self.copy_only, true, "复制（保留源文件）");
-                        });
-
-                        ui.add_space(6.0);
-                        ui.label("目标目录");
-                        if action_button(
+                        // Step 4 · migrate settings
+                        if step_header(
                             ui,
-                            "📂  选择目标文件夹",
-                            SURFACE_HI,
-                            ACCENT,
-                            46.0,
-                            !self.busy,
+                            "4 · 迁移设置",
+                            self.step == Step::Migrate,
+                            self.migrate_available(),
                         )
                         .clicked()
-                            && let Some(dir) = rfd::FileDialog::new().pick_folder()
+                            && self.step != Step::Migrate
                         {
-                            self.target = dir.display().to_string();
+                            self.step = Step::Migrate;
                         }
-                        ui.label(egui::RichText::new(&self.target).size(11.5).weak());
-                        ui.add_space(14.0);
+                        if self.step == Step::Migrate {
+                            ui.add_space(6.0);
+                            ui.label("方式");
+                            ui.horizontal(|ui| {
+                                ui.radio_value(&mut self.copy_only, false, "移动（删除源文件）");
+                                ui.radio_value(&mut self.copy_only, true, "复制（保留源文件）");
+                            });
+                            ui.add_space(6.0);
+                            ui.label("目标目录");
+                            if action_button(
+                                ui,
+                                "📂  选择目标文件夹",
+                                SURFACE_HI,
+                                TEXT,
+                                44.0,
+                                !self.busy,
+                            )
+                            .clicked()
+                                && let Some(dir) = rfd::FileDialog::new().pick_folder()
+                            {
+                                self.target = dir.display().to_string();
+                            }
+                            ui.label(egui::RichText::new(&self.target).size(11.5).weak());
+                            ui.add_space(12.0);
+                        }
                     });
             });
 
@@ -810,7 +959,7 @@ impl eframe::App for CamDropApp {
                     egui::RichText::new("预览")
                         .size(17.0)
                         .strong()
-                        .color(ACCENT),
+                        .color(ACCENT_DARK),
                 );
                 ui.add_space(12.0);
                 ui.selectable_value(&mut self.view, ViewMode::Files, "文件");
@@ -824,7 +973,7 @@ impl eframe::App for CamDropApp {
                             "{shown_len} 个文件 · {}",
                             human_size(total_size)
                         ))
-                        .color(ACCENT),
+                        .color(ACCENT_DARK),
                     );
                 });
             });
@@ -893,7 +1042,9 @@ impl eframe::App for CamDropApp {
                                     ui.label(&item.captured);
                                 });
                                 row.col(|ui| {
-                                    ui.label(egui::RichText::new(target_path(item)).color(ACCENT));
+                                    ui.label(
+                                        egui::RichText::new(target_path(item)).color(ACCENT_DARK),
+                                    );
                                 });
                                 row.col(|ui| {
                                     ui.label(if item.has_xmp { "有" } else { "—" });
@@ -918,7 +1069,7 @@ impl eframe::App for CamDropApp {
                                     human_size(folder_size)
                                 ))
                                 .strong()
-                                .color(ACCENT);
+                                .color(ACCENT_DARK);
                                 egui::CollapsingHeader::new(header).default_open(true).show(
                                     ui,
                                     |ui| {
@@ -935,5 +1086,30 @@ impl eframe::App for CamDropApp {
                 }
             }
         });
+
+        // Validation popup.
+        if let Some(problems) = self.dialog.clone() {
+            let mut close = false;
+            let response = egui::Modal::new(egui::Id::new("validation")).show(&ctx, |ui| {
+                ui.set_max_width(440.0);
+                ui.label(
+                    egui::RichText::new("还不能开始迁移")
+                        .size(17.0)
+                        .strong()
+                        .color(ACCENT_DARK),
+                );
+                ui.add_space(8.0);
+                for problem in &problems {
+                    ui.label(format!("• {problem}"));
+                }
+                ui.add_space(12.0);
+                if ui.button("知道了").clicked() {
+                    close = true;
+                }
+            });
+            if close || response.should_close() {
+                self.dialog = None;
+            }
+        }
     }
 }
